@@ -688,6 +688,75 @@ namespace qcs
             }
         };
 
+        struct swap2
+        {
+            static constexpr unsigned int num_target_qubits = 4;
+
+            __device__ void apply(qcs::complex_t const &s0000_in,
+                                  qcs::complex_t const &s0001_in,
+                                  qcs::complex_t const &s0010_in,
+                                  qcs::complex_t const &s0011_in,
+                                  qcs::complex_t const &s0100_in,
+                                  qcs::complex_t const &s0101_in,
+                                  qcs::complex_t const &s0110_in,
+                                  qcs::complex_t const &s0111_in,
+                                  qcs::complex_t const &s1000_in,
+                                  qcs::complex_t const &s1001_in,
+                                  qcs::complex_t const &s1010_in,
+                                  qcs::complex_t const &s1011_in,
+                                  qcs::complex_t const &s1100_in,
+                                  qcs::complex_t const &s1101_in,
+                                  qcs::complex_t const &s1110_in,
+                                  qcs::complex_t const &s1111_in,
+                                  qcs::complex_t &s0000_out,
+                                  qcs::complex_t &s0001_out,
+                                  qcs::complex_t &s0010_out,
+                                  qcs::complex_t &s0011_out,
+                                  qcs::complex_t &s0100_out,
+                                  qcs::complex_t &s0101_out,
+                                  qcs::complex_t &s0110_out,
+                                  qcs::complex_t &s0111_out,
+                                  qcs::complex_t &s1000_out,
+                                  qcs::complex_t &s1001_out,
+                                  qcs::complex_t &s1010_out,
+                                  qcs::complex_t &s1011_out,
+                                  qcs::complex_t &s1100_out,
+                                  qcs::complex_t &s1101_out,
+                                  qcs::complex_t &s1110_out,
+                                  qcs::complex_t &s1111_out) const
+            {
+                // Swap target bits 0/1 and 2/3; inputs and outputs may alias.
+                auto const s0001_in_copy = s0001_in;
+                auto const s0010_in_copy = s0010_in;
+                auto const s0100_in_copy = s0100_in;
+                auto const s0101_in_copy = s0101_in;
+                auto const s0110_in_copy = s0110_in;
+                auto const s0111_in_copy = s0111_in;
+                auto const s1000_in_copy = s1000_in;
+                auto const s1001_in_copy = s1001_in;
+                auto const s1010_in_copy = s1010_in;
+                auto const s1011_in_copy = s1011_in;
+                auto const s1101_in_copy = s1101_in;
+                auto const s1110_in_copy = s1110_in;
+                // s0000_out = s0000_in;
+                s0001_out = s0010_in_copy;
+                s0010_out = s0001_in_copy;
+                // s0011_out = s0011_in;
+                s0100_out = s1000_in_copy;
+                s0101_out = s1010_in_copy;
+                s0110_out = s1001_in_copy;
+                s0111_out = s1011_in_copy;
+                s1000_out = s0100_in_copy;
+                s1001_out = s0110_in_copy;
+                s1010_out = s0101_in_copy;
+                s1011_out = s0111_in_copy;
+                // s1100_out = s1100_in;
+                s1101_out = s1110_in_copy;
+                s1110_out = s1101_in_copy;
+                // s1111_out = s1111_in;
+            }
+        };
+
         struct iswap
         {
             static constexpr unsigned int num_target_qubits = 2;
@@ -3223,6 +3292,14 @@ void qcs_simulator_gate_swap_cxx(qcs_simulator *sim, bit_num_t const *target_qub
     sim->core->operate_gate(qcs::gate::swap(), targets, negctrls, ctrls);
 }
 
+void qcs_simulator_gate_swap2_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
+{
+    auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
+    auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
+    auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
+    sim->core->operate_gate(qcs::gate::swap2(), targets, negctrls, ctrls);
+}
+
 void qcs_simulator_gate_iswap_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
 {
     auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
@@ -3753,6 +3830,12 @@ extern "C" int qcs_simulator_gate_swap(qcs_simulator *sim, const bit_num_t *targ
 {
     return qcs_try_cxx([&]()
                 { qcs_simulator_gate_swap_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
+}
+
+extern "C" int qcs_simulator_gate_swap2(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
+{
+    return qcs_try_cxx([&]()
+                { qcs_simulator_gate_swap2_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
 }
 
 extern "C" int qcs_simulator_gate_iswap(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
