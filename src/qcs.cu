@@ -1567,6 +1567,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[2];
         qcs::complex_t *s_out[2];
+        #pragma unroll 2
         for (int i = 0; i < 2; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1588,6 +1589,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[4];
         qcs::complex_t *s_out[4];
+        #pragma unroll 4
         for (int i = 0; i < 4; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1609,6 +1611,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[8];
         qcs::complex_t *s_out[8];
+        #pragma unroll 8
         for (int i = 0; i < 8; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1630,6 +1633,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[16];
         qcs::complex_t *s_out[16];
+        #pragma unroll 16
         for (int i = 0; i < 16; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1651,6 +1655,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[32];
         qcs::complex_t *s_out[32];
+        #pragma unroll 32
         for (int i = 0; i < 32; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1672,6 +1677,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[64];
         qcs::complex_t *s_out[64];
+        #pragma unroll 64
         for (int i = 0; i < 64; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1693,6 +1699,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[128];
         qcs::complex_t *s_out[128];
+        #pragma unroll 128
         for (int i = 0; i < 128; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
@@ -1714,6 +1721,7 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[256];
         qcs::complex_t *s_out[256];
+        #pragma unroll 256
         for (int i = 0; i < 256; ++i)
         {
             s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
