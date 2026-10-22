@@ -210,8 +210,8 @@ namespace qcs
         uint64_t *index_state,
         int &is_measured_bits, int &measured_value_bits)
     {
-        static_assert(num_target_qubits >= 1 && num_target_qubits <= 8,
-                      "num_target_qubits must be between 1 and 8");
+        static_assert(num_target_qubits >= 1,
+                      "num_target_qubits must be at least 1");
 
         thread_num_to_state_index_q0(thread_num, index_state[0]);
 
