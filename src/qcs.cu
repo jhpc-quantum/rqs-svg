@@ -228,6 +228,8 @@ namespace qcs
 
     namespace gate
     {
+        constexpr unsigned int max_num_swaps = 4;
+
         // Pointer arrays use ascending basis indices, with target 0 as the least
         // significant bit. Inputs and outputs may alias; unchanged outputs are not written.
 
@@ -527,8 +529,8 @@ namespace qcs
         template <unsigned int num_swaps>
         struct swap
         {
-            static_assert(num_swaps > 0 && num_swaps < 32,
-                          "num_swaps must be positive and 2 * num_swaps must fit a uint64_t basis index");
+            static_assert(num_swaps > 0 && num_swaps <= max_num_swaps,
+                          "num_swaps must be between 1 and max_num_swaps");
             static constexpr unsigned int num_target_qubits = 2 * num_swaps;
 
             __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
@@ -2246,6 +2248,26 @@ static std::vector<int> qcs_vector_from_array(bit_num_t const *values, bit_num_t
     return std::vector<int>(values, values + count);
 }
 
+template <unsigned int num_swaps = 1>
+static void qcs_simulator_operate_swap(qcs_simulator *sim, bit_num_t target_qubit_num_count,
+                                       std::vector<int> const &targets,
+                                       std::vector<int> const &negctrls,
+                                       std::vector<int> const &ctrls)
+{
+    if (target_qubit_num_count == 2 * num_swaps)
+    {
+        sim->core->operate_gate(qcs::gate::swap<num_swaps>(), targets, negctrls, ctrls);
+    }
+    else if constexpr (num_swaps < qcs::gate::max_num_swaps)
+    {
+        qcs_simulator_operate_swap<num_swaps + 1>(sim, target_qubit_num_count, targets, negctrls, ctrls);
+    }
+    else
+    {
+        throw std::runtime_error("SWAP target count must be an even number from 2 through 2 * max_num_swaps");
+    }
+}
+
 static void qcs_simulator_init(qcs_simulator *sim)
 {
     sim->num_qubits = 0;
@@ -2491,23 +2513,7 @@ void qcs_simulator_gate_swap_cxx(qcs_simulator *sim, bit_num_t const *target_qub
     auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
     auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
     auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
-    switch (target_qubit_num_count)
-    {
-    case 2:
-        sim->core->operate_gate(qcs::gate::swap<1>(), targets, negctrls, ctrls);
-        break;
-    case 4:
-        sim->core->operate_gate(qcs::gate::swap<2>(), targets, negctrls, ctrls);
-        break;
-    case 6:
-        sim->core->operate_gate(qcs::gate::swap<3>(), targets, negctrls, ctrls);
-        break;
-    case 8:
-        sim->core->operate_gate(qcs::gate::swap<4>(), targets, negctrls, ctrls);
-        break;
-    default:
-        throw std::runtime_error("SWAP target count must be 2, 4, 6, or 8");
-    }
+    qcs_simulator_operate_swap(sim, target_qubit_num_count, targets, negctrls, ctrls);
 }
 
 void qcs_simulator_gate_iswap_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)

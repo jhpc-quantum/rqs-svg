@@ -80,12 +80,15 @@ Python bindings are maintained separately at
 
 ### Swapping pairs of qubits
 
-`qcs_simulator_gate_swap` applies one to four disjoint SWAPs in one gate
-operation. Supply 2, 4, 6, or 8 distinct target qubits: entries 0 and 1 form
-one pair, entries 2 and 3 form the next, and so on. Positive and negative
-controls condition all swaps together. Other target counts are rejected.
+`qcs_simulator_gate_swap` applies up to `qcs::gate::max_num_swaps` disjoint
+SWAPs in one gate operation. Supply an even number of distinct targets, from 2
+through twice that maximum:
+entries 0 and 1 form one pair, entries 2 and 3 form the next, and so on.
+Positive and negative controls condition all swaps together. The supported
+maximum is set by the `qcs::gate::max_num_swaps` constexpr in `src/qcs.cu`;
+other target counts are rejected.
 The C++ API is `qcs_simulator_gate_swap_cxx`, which selects `qcs::gate::swap<N>()`
-with a compile-time `N` of 1, 2, 3, or 4 based on the target count.
+with a compile-time `N` based on the target count.
 The numbered C APIs `qcs_simulator_gate_swap1` through `qcs_simulator_gate_swap4`
 remain available and require exactly 2, 4, 6, and 8 targets, respectively.
 
