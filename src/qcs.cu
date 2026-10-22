@@ -553,11 +553,6 @@ namespace qcs
             }
         };
 
-        using swap1 = swap<1>;
-        using swap2 = swap<2>;
-        using swap3 = swap<3>;
-        using swap4 = swap<4>;
-
         struct iswap
         {
             static constexpr unsigned int num_target_qubits = 2;
@@ -2496,36 +2491,23 @@ void qcs_simulator_gate_swap_cxx(qcs_simulator *sim, bit_num_t const *target_qub
     auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
     auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
     auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
-    sim->core->operate_gate(qcs::gate::swap<1>(), targets, negctrls, ctrls);
-}
-
-void qcs_simulator_gate_swap1_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
-{
-    qcs_simulator_gate_swap_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count);
-}
-
-void qcs_simulator_gate_swap2_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
-{
-    auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
-    auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
-    auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
-    sim->core->operate_gate(qcs::gate::swap2(), targets, negctrls, ctrls);
-}
-
-void qcs_simulator_gate_swap3_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
-{
-    auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
-    auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
-    auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
-    sim->core->operate_gate(qcs::gate::swap3(), targets, negctrls, ctrls);
-}
-
-void qcs_simulator_gate_swap4_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
-{
-    auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
-    auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
-    auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
-    sim->core->operate_gate(qcs::gate::swap4(), targets, negctrls, ctrls);
+    switch (target_qubit_num_count)
+    {
+    case 2:
+        sim->core->operate_gate(qcs::gate::swap<1>(), targets, negctrls, ctrls);
+        break;
+    case 4:
+        sim->core->operate_gate(qcs::gate::swap<2>(), targets, negctrls, ctrls);
+        break;
+    case 6:
+        sim->core->operate_gate(qcs::gate::swap<3>(), targets, negctrls, ctrls);
+        break;
+    case 8:
+        sim->core->operate_gate(qcs::gate::swap<4>(), targets, negctrls, ctrls);
+        break;
+    default:
+        throw std::runtime_error("SWAP target count must be 2, 4, 6, or 8");
+    }
 }
 
 void qcs_simulator_gate_iswap_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
@@ -3063,25 +3045,41 @@ extern "C" int qcs_simulator_gate_swap(qcs_simulator *sim, const bit_num_t *targ
 extern "C" int qcs_simulator_gate_swap1(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
 {
     return qcs_try_cxx([&]()
-                { qcs_simulator_gate_swap1_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
+                {
+                    if (target_qubit_num_count != 2)
+                        throw std::runtime_error("SWAP1 target count must be 2");
+                    qcs_simulator_gate_swap_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count);
+                });
 }
 
 extern "C" int qcs_simulator_gate_swap2(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
 {
     return qcs_try_cxx([&]()
-                { qcs_simulator_gate_swap2_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
+                {
+                    if (target_qubit_num_count != 4)
+                        throw std::runtime_error("SWAP2 target count must be 4");
+                    qcs_simulator_gate_swap_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count);
+                });
 }
 
 extern "C" int qcs_simulator_gate_swap3(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
 {
     return qcs_try_cxx([&]()
-                { qcs_simulator_gate_swap3_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
+                {
+                    if (target_qubit_num_count != 6)
+                        throw std::runtime_error("SWAP3 target count must be 6");
+                    qcs_simulator_gate_swap_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count);
+                });
 }
 
 extern "C" int qcs_simulator_gate_swap4(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
 {
     return qcs_try_cxx([&]()
-                { qcs_simulator_gate_swap4_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
+                {
+                    if (target_qubit_num_count != 8)
+                        throw std::runtime_error("SWAP4 target count must be 8");
+                    qcs_simulator_gate_swap_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count);
+                });
 }
 
 extern "C" int qcs_simulator_gate_iswap(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)

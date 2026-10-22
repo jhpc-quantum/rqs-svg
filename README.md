@@ -78,18 +78,21 @@ Code examples for linking against `libqcs.so` live under
 Python bindings are maintained separately at
 [`rqs-svg-py`](https://github.com/naoto-aoki-fy/rqs-svg-py).
 
-### Swapping two pairs of qubits
+### Swapping pairs of qubits
 
-`qcs_simulator_gate_swap2` applies two disjoint SWAPs in one four-target
-gate operation. Supply four distinct target qubits: entries 0 and 1 form
-one pair, and entries 2 and 3 form the other. Positive and negative controls
-condition both swaps together, using the same interface as `qcs_simulator_gate_swap`.
-The C++ API is `qcs_simulator_gate_swap2_cxx`.
+`qcs_simulator_gate_swap` applies one to four disjoint SWAPs in one gate
+operation. Supply 2, 4, 6, or 8 distinct target qubits: entries 0 and 1 form
+one pair, entries 2 and 3 form the next, and so on. Positive and negative
+controls condition all swaps together. Other target counts are rejected.
+The C++ API is `qcs_simulator_gate_swap_cxx`, which selects `qcs::gate::swap<N>()`
+with a compile-time `N` of 1, 2, 3, or 4 based on the target count.
+The numbered C APIs `qcs_simulator_gate_swap1` through `qcs_simulator_gate_swap4`
+remain available and require exactly 2, 4, 6, and 8 targets, respectively.
 
 ```c
 const bit_num_t targets[] = {0, 3, 1, 2};
 /* SWAP(0, 3) and SWAP(1, 2) */
-int ok = qcs_simulator_gate_swap2(sim, targets, 4, NULL, 0, NULL, 0);
+int ok = qcs_simulator_gate_swap(sim, targets, 4, NULL, 0, NULL, 0);
 ```
 
 ### Measuring multiple qubits
