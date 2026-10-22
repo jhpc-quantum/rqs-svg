@@ -1136,6 +1136,8 @@ namespace qcs
 
     namespace gate
     {
+        // Pointer arrays use ascending basis indices, with target 0 as the least
+        // significant bit. Inputs and outputs may alias; unchanged outputs are not written.
 
         struct u4
         {
@@ -1154,12 +1156,12 @@ namespace qcs
                 exp_i_lambda = qcs::complex_t(cos(lambda), sin(lambda));
                 exp_i_gamma = qcs::complex_t(cos(gamma), sin(gamma));
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                qcs::complex_t const s0_in_copy = s0_in;
-                qcs::complex_t const s1_in_copy = s1_in;
-                s0_out = exp_i_gamma * (cos_theta_2 * s0_in_copy - sin_theta_2 * exp_i_lambda * s1_in_copy);
-                s1_out = exp_i_gamma * (exp_i_phi * (sin_theta_2 * s0_in_copy + exp_i_lambda * cos_theta_2 * s1_in_copy));
+                qcs::complex_t const s0_in_copy = *s_in[0];
+                qcs::complex_t const s1_in_copy = *s_in[1];
+                *s_out[0] = exp_i_gamma * (cos_theta_2 * s0_in_copy - sin_theta_2 * exp_i_lambda * s1_in_copy);
+                *s_out[1] = exp_i_gamma * (exp_i_phi * (sin_theta_2 * s0_in_copy + exp_i_lambda * cos_theta_2 * s1_in_copy));
             }
         };
 
@@ -1181,12 +1183,12 @@ namespace qcs
                 qcs::float_t const phi_plus_lambda = phi + lambda;
                 exp_i_phi_plus_lambda = qcs::complex_t(cos(phi_plus_lambda), sin(phi_plus_lambda));
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                qcs::complex_t const s0_in_copy = s0_in;
-                qcs::complex_t const s1_in_copy = s1_in;
-                s0_out = cos_theta_2 * s0_in_copy - sin_theta_2 * exp_i_lambda * s1_in_copy;
-                s1_out = exp_i_phi * sin_theta_2 * s0_in_copy + exp_i_phi_plus_lambda * cos_theta_2 * s1_in_copy;
+                qcs::complex_t const s0_in_copy = *s_in[0];
+                qcs::complex_t const s1_in_copy = *s_in[1];
+                *s_out[0] = cos_theta_2 * s0_in_copy - sin_theta_2 * exp_i_lambda * s1_in_copy;
+                *s_out[1] = exp_i_phi * sin_theta_2 * s0_in_copy + exp_i_phi_plus_lambda * cos_theta_2 * s1_in_copy;
             }
         };
 
@@ -1203,12 +1205,12 @@ namespace qcs
                 qcs::float_t const phi_plus_lambda = phi + lambda;
                 exp_i_phi_plus_lambda = qcs::complex_t(cos(phi_plus_lambda), sin(phi_plus_lambda));
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                qcs::complex_t const s0_in_copy = s0_in;
-                qcs::complex_t const s1_in_copy = s1_in;
-                s0_out = M_SQRT1_2 * (s0_in_copy - exp_i_lambda * s1_in_copy);
-                s1_out = M_SQRT1_2 * (exp_i_phi * s0_in_copy + exp_i_phi_plus_lambda * s1_in_copy);
+                qcs::complex_t const s0_in_copy = *s_in[0];
+                qcs::complex_t const s1_in_copy = *s_in[1];
+                *s_out[0] = M_SQRT1_2 * (s0_in_copy - exp_i_lambda * s1_in_copy);
+                *s_out[1] = M_SQRT1_2 * (exp_i_phi * s0_in_copy + exp_i_phi_plus_lambda * s1_in_copy);
             }
         };
 
@@ -1220,10 +1222,10 @@ namespace qcs
             {
                 exp_i_lambda = qcs::complex_t(cos(lambda), sin(lambda));
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                s0_out = s0_in;
-                s1_out = exp_i_lambda * s1_in;
+                *s_out[0] = *s_in[0];
+                *s_out[1] = exp_i_lambda * *s_in[1];
             }
         };
 
@@ -1239,28 +1241,28 @@ namespace qcs
                 exp_i_theta.real(cos(theta));
                 exp_i_theta.imag(sin(theta));
             }
-            __device__ void apply(qcs::complex_t const &s_in, qcs::complex_t &s_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                s_out = exp_i_theta * s_in;
+                *s_out[0] = exp_i_theta * *s_in[0];
             }
         };
 
         struct hadamard
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                s0_out = M_SQRT1_2 * (s0_in_copy + s1_in_copy);
-                s1_out = M_SQRT1_2 * (s0_in_copy - s1_in_copy);
+                auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                *s_out[0] = M_SQRT1_2 * (s0_in_copy + s1_in_copy);
+                *s_out[1] = M_SQRT1_2 * (s0_in_copy - s1_in_copy);
             }
         };
 
         struct identity
         {
             static constexpr unsigned int num_target_qubits = 0;
-            __device__ void apply() const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
             }
         };
@@ -1268,97 +1270,97 @@ namespace qcs
         struct x
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                s0_out = s1_in_copy;
-                s1_out = s0_in_copy;
+                auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                *s_out[0] = s1_in_copy;
+                *s_out[1] = s0_in_copy;
             }
         };
 
         struct y
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                s0_out.real(s1_in_copy.imag());
-                s0_out.imag(-s1_in_copy.real());
-                s1_out.real(-s0_in_copy.imag());
-                s1_out.imag(s0_in_copy.real());
+                auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                s_out[0]->real(s1_in_copy.imag());
+                s_out[0]->imag(-s1_in_copy.real());
+                s_out[1]->real(-s0_in_copy.imag());
+                s_out[1]->imag(s0_in_copy.real());
             }
         };
 
         struct z
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                // auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                // s0_out = s0_in_copy;
-                s1_out = -s1_in_copy;
+                // auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                // *s_out[0] = s0_in_copy;
+                *s_out[1] = -s1_in_copy;
             }
         };
 
         struct s
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s1_in_copy = s1_in;
-                s1_out.real(-s1_in_copy.imag());
-                s1_out.imag(s1_in_copy.real());
+                auto const s1_in_copy = *s_in[1];
+                s_out[1]->real(-s1_in_copy.imag());
+                s_out[1]->imag(s1_in_copy.real());
             }
         };
 
         struct sdg
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s1_in_copy = s1_in;
-                s1_out.real(s1_in_copy.imag());
-                s1_out.imag(-s1_in_copy.real());
+                auto const s1_in_copy = *s_in[1];
+                s_out[1]->real(s1_in_copy.imag());
+                s_out[1]->imag(-s1_in_copy.real());
             }
         };
 
         struct t
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s1_in_copy = s1_in;
-                s1_out = qcs::complex_t(M_SQRT1_2, M_SQRT1_2) * s1_in_copy;
+                auto const s1_in_copy = *s_in[1];
+                *s_out[1] = qcs::complex_t(M_SQRT1_2, M_SQRT1_2) * s1_in_copy;
             }
         };
 
         struct tdg
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s1_in_copy = s1_in;
-                s1_out = qcs::complex_t(M_SQRT1_2, -M_SQRT1_2) * s1_in_copy;
+                auto const s1_in_copy = *s_in[1];
+                *s_out[1] = qcs::complex_t(M_SQRT1_2, -M_SQRT1_2) * s1_in_copy;
             }
         };
 
         struct sx
         {
             static constexpr unsigned int num_target_qubits = 1;
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                // auto const s0_in_copy = s0_in;
-                // auto const s1_in_copy = s1_in;
-                // s0_out = qcs::complex_t(0.5, 0.5) * s0_in_copy + qcs::complex_t(0.5, - 0.5) * s1_in_copy;
-                // s1_out = qcs::complex_t(0.5, - 0.5) * s0_in_copy + qcs::complex_t(0.5, 0.5) * s1_in_copy;
+                // auto const s0_in_copy = *s_in[0];
+                // auto const s1_in_copy = *s_in[1];
+                // *s_out[0] = qcs::complex_t(0.5, 0.5) * s0_in_copy + qcs::complex_t(0.5, - 0.5) * s1_in_copy;
+                // *s_out[1] = qcs::complex_t(0.5, - 0.5) * s0_in_copy + qcs::complex_t(0.5, 0.5) * s1_in_copy;
 
-                auto const a = 0.5 * (s0_in + s1_in);
-                auto const b = 0.5 * multiply_i(s0_in - s1_in);
-                s0_out = a + b;
-                s1_out = a - b;
+                auto const a = 0.5 * (*s_in[0] + *s_in[1]);
+                auto const b = 0.5 * multiply_i(*s_in[0] - *s_in[1]);
+                *s_out[0] = a + b;
+                *s_out[1] = a - b;
             }
         };
 
@@ -1366,15 +1368,12 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 1;
 
-            __device__ void apply(qcs::complex_t const &s0_in,
-                                  qcs::complex_t const &s1_in,
-                                  qcs::complex_t &s0_out,
-                                  qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const a = 0.5 * (s0_in + s1_in);
-                auto const b = -0.5 * multiply_i(s0_in - s1_in);
-                s0_out = a + b;
-                s1_out = a - b;
+                auto const a = 0.5 * (*s_in[0] + *s_in[1]);
+                auto const b = -0.5 * multiply_i(*s_in[0] - *s_in[1]);
+                *s_out[0] = a + b;
+                *s_out[1] = a - b;
             }
         };
 
@@ -1388,12 +1387,12 @@ namespace qcs
                 cos_theta_2 = cos(0.5 * theta);
                 sin_theta_2 = sin(0.5 * theta);
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                s0_out = cos_theta_2 * s0_in_copy + multiply_i_real(s1_in_copy, -sin_theta_2);
-                s1_out = multiply_i_real(s0_in_copy, -sin_theta_2) + cos_theta_2 * s1_in_copy;
+                auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                *s_out[0] = cos_theta_2 * s0_in_copy + multiply_i_real(s1_in_copy, -sin_theta_2);
+                *s_out[1] = multiply_i_real(s0_in_copy, -sin_theta_2) + cos_theta_2 * s1_in_copy;
             }
         };
 
@@ -1407,12 +1406,12 @@ namespace qcs
                 cos_theta_2 = cos(0.5 * theta);
                 sin_theta_2 = sin(0.5 * theta);
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                s0_out = cos_theta_2 * s0_in_copy - sin_theta_2 * s1_in_copy;
-                s1_out = sin_theta_2 * s0_in_copy + cos_theta_2 * s1_in_copy;
+                auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                *s_out[0] = cos_theta_2 * s0_in_copy - sin_theta_2 * s1_in_copy;
+                *s_out[1] = sin_theta_2 * s0_in_copy + cos_theta_2 * s1_in_copy;
             }
         };
 
@@ -1426,24 +1425,24 @@ namespace qcs
                 cos_theta_2 = cos(0.5 * theta);
                 sin_theta_2 = sin(0.5 * theta);
             }
-            __device__ void apply(qcs::complex_t const &s0_in, qcs::complex_t const &s1_in, qcs::complex_t &s0_out, qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                s0_out = qcs::complex_t(cos_theta_2, -sin_theta_2) * s0_in;
-                s1_out = qcs::complex_t(cos_theta_2, sin_theta_2) * s1_in;
+                *s_out[0] = qcs::complex_t(cos_theta_2, -sin_theta_2) * *s_in[0];
+                *s_out[1] = qcs::complex_t(cos_theta_2, sin_theta_2) * *s_in[1];
             }
         };
 
         struct swap
         {
             static constexpr unsigned int num_target_qubits = 2;
-            __device__ void apply(qcs::complex_t const &s00_in, qcs::complex_t const &s01_in, qcs::complex_t const &s10_in, qcs::complex_t const &s11_in, qcs::complex_t &s00_out, qcs::complex_t &s01_out, qcs::complex_t &s10_out, qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
-                // s00_out = s00_in;
-                s01_out = s10_in_copy;
-                s10_out = s01_in_copy;
-                // s11_out = s11_in;
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
+                // *s_out[0] = *s_in[0];
+                *s_out[1] = s10_in_copy;
+                *s_out[2] = s01_in_copy;
+                // *s_out[3] = *s_in[3];
             }
         };
 
@@ -1451,84 +1450,53 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 4;
 
-            __device__ void apply(qcs::complex_t const &s0000_in,
-                                  qcs::complex_t const &s0001_in,
-                                  qcs::complex_t const &s0010_in,
-                                  qcs::complex_t const &s0011_in,
-                                  qcs::complex_t const &s0100_in,
-                                  qcs::complex_t const &s0101_in,
-                                  qcs::complex_t const &s0110_in,
-                                  qcs::complex_t const &s0111_in,
-                                  qcs::complex_t const &s1000_in,
-                                  qcs::complex_t const &s1001_in,
-                                  qcs::complex_t const &s1010_in,
-                                  qcs::complex_t const &s1011_in,
-                                  qcs::complex_t const &s1100_in,
-                                  qcs::complex_t const &s1101_in,
-                                  qcs::complex_t const &s1110_in,
-                                  qcs::complex_t const &s1111_in,
-                                  qcs::complex_t &s0000_out,
-                                  qcs::complex_t &s0001_out,
-                                  qcs::complex_t &s0010_out,
-                                  qcs::complex_t &s0011_out,
-                                  qcs::complex_t &s0100_out,
-                                  qcs::complex_t &s0101_out,
-                                  qcs::complex_t &s0110_out,
-                                  qcs::complex_t &s0111_out,
-                                  qcs::complex_t &s1000_out,
-                                  qcs::complex_t &s1001_out,
-                                  qcs::complex_t &s1010_out,
-                                  qcs::complex_t &s1011_out,
-                                  qcs::complex_t &s1100_out,
-                                  qcs::complex_t &s1101_out,
-                                  qcs::complex_t &s1110_out,
-                                  qcs::complex_t &s1111_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
                 // Swap target bits 0/1 and 2/3; inputs and outputs may alias.
-                auto const s0001_in_copy = s0001_in;
-                auto const s0010_in_copy = s0010_in;
-                auto const s0100_in_copy = s0100_in;
-                auto const s0101_in_copy = s0101_in;
-                auto const s0110_in_copy = s0110_in;
-                auto const s0111_in_copy = s0111_in;
-                auto const s1000_in_copy = s1000_in;
-                auto const s1001_in_copy = s1001_in;
-                auto const s1010_in_copy = s1010_in;
-                auto const s1011_in_copy = s1011_in;
-                auto const s1101_in_copy = s1101_in;
-                auto const s1110_in_copy = s1110_in;
-                // s0000_out = s0000_in;
-                s0001_out = s0010_in_copy;
-                s0010_out = s0001_in_copy;
-                // s0011_out = s0011_in;
-                s0100_out = s1000_in_copy;
-                s0101_out = s1010_in_copy;
-                s0110_out = s1001_in_copy;
-                s0111_out = s1011_in_copy;
-                s1000_out = s0100_in_copy;
-                s1001_out = s0110_in_copy;
-                s1010_out = s0101_in_copy;
-                s1011_out = s0111_in_copy;
-                // s1100_out = s1100_in;
-                s1101_out = s1110_in_copy;
-                s1110_out = s1101_in_copy;
-                // s1111_out = s1111_in;
+                auto const s0001_in_copy = *s_in[1];
+                auto const s0010_in_copy = *s_in[2];
+                auto const s0100_in_copy = *s_in[4];
+                auto const s0101_in_copy = *s_in[5];
+                auto const s0110_in_copy = *s_in[6];
+                auto const s0111_in_copy = *s_in[7];
+                auto const s1000_in_copy = *s_in[8];
+                auto const s1001_in_copy = *s_in[9];
+                auto const s1010_in_copy = *s_in[10];
+                auto const s1011_in_copy = *s_in[11];
+                auto const s1101_in_copy = *s_in[13];
+                auto const s1110_in_copy = *s_in[14];
+                // *s_out[0] = *s_in[0];
+                *s_out[1] = s0010_in_copy;
+                *s_out[2] = s0001_in_copy;
+                // *s_out[3] = *s_in[3];
+                *s_out[4] = s1000_in_copy;
+                *s_out[5] = s1010_in_copy;
+                *s_out[6] = s1001_in_copy;
+                *s_out[7] = s1011_in_copy;
+                *s_out[8] = s0100_in_copy;
+                *s_out[9] = s0110_in_copy;
+                *s_out[10] = s0101_in_copy;
+                *s_out[11] = s0111_in_copy;
+                // *s_out[12] = *s_in[12];
+                *s_out[13] = s1110_in_copy;
+                *s_out[14] = s1101_in_copy;
+                // *s_out[15] = *s_in[15];
             }
         };
 
         struct iswap
         {
             static constexpr unsigned int num_target_qubits = 2;
-            __device__ void apply(qcs::complex_t const &s00_in, qcs::complex_t const &s01_in, qcs::complex_t const &s10_in, qcs::complex_t const &s11_in, qcs::complex_t &s00_out, qcs::complex_t &s01_out, qcs::complex_t &s10_out, qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
-                // s00_out = s00_in;
-                s01_out.real(-s10_in_copy.imag());
-                s01_out.imag(s10_in_copy.real());
-                s10_out.real(-s01_in_copy.imag());
-                s10_out.imag(s01_in_copy.real());
-                // s11_out = s11_in;
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
+                // *s_out[0] = *s_in[0];
+                s_out[1]->real(-s10_in_copy.imag());
+                s_out[1]->imag(s10_in_copy.real());
+                s_out[2]->real(-s01_in_copy.imag());
+                s_out[2]->imag(s01_in_copy.real());
+                // *s_out[3] = *s_in[3];
             }
         };
 
@@ -1536,13 +1504,10 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 1;
 
-            __device__ void apply(qcs::complex_t const &s0_in,
-                                  qcs::complex_t const &s1_in,
-                                  qcs::complex_t &s0_out,
-                                  qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                // s0_out = s0_in;
-                // s1_out = s1_in;
+                // *s_out[0] = *s_in[0];
+                // *s_out[1] = *s_in[1];
             }
         };
 
@@ -1566,15 +1531,12 @@ namespace qcs
                 exp_minus_i_phi = qcs::complex_t(cos_phi, -sin_phi);
             }
 
-            __device__ void apply(qcs::complex_t const &s0_in,
-                                  qcs::complex_t const &s1_in,
-                                  qcs::complex_t &s0_out,
-                                  qcs::complex_t &s1_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0_in_copy = s0_in;
-                auto const s1_in_copy = s1_in;
-                s0_out = cos_theta_2 * s0_in_copy + multiply_i_real(exp_minus_i_phi * s1_in_copy, -sin_theta_2);
-                s1_out = multiply_i_real(exp_i_phi * s0_in_copy, -sin_theta_2) + cos_theta_2 * s1_in_copy;
+                auto const s0_in_copy = *s_in[0];
+                auto const s1_in_copy = *s_in[1];
+                *s_out[0] = cos_theta_2 * s0_in_copy + multiply_i_real(exp_minus_i_phi * s1_in_copy, -sin_theta_2);
+                *s_out[1] = multiply_i_real(exp_i_phi * s0_in_copy, -sin_theta_2) + cos_theta_2 * s1_in_copy;
             }
         };
 
@@ -1592,19 +1554,12 @@ namespace qcs
                 phase_plus = qcs::complex_t(cos(theta_2), sin(theta_2));
             }
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                s00_out = phase_minus * s00_in;
-                s01_out = phase_plus * s01_in;
-                s10_out = phase_plus * s10_in;
-                s11_out = phase_minus * s11_in;
+                *s_out[0] = phase_minus * *s_in[0];
+                *s_out[1] = phase_plus * *s_in[1];
+                *s_out[2] = phase_plus * *s_in[2];
+                *s_out[3] = phase_minus * *s_in[3];
             }
         };
 
@@ -1622,24 +1577,17 @@ namespace qcs
                 m_sin_theta_2 = -sin(theta_2);
             }
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s00_in_copy = s00_in;
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
-                auto const s11_in_copy = s11_in;
+                auto const s00_in_copy = *s_in[0];
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
+                auto const s11_in_copy = *s_in[3];
 
-                s00_out = cos_theta_2 * s00_in_copy + multiply_i_real(s11_in_copy, m_sin_theta_2);
-                s01_out = cos_theta_2 * s01_in_copy + multiply_i_real(s10_in_copy, m_sin_theta_2);
-                s10_out = cos_theta_2 * s10_in_copy + multiply_i_real(s01_in_copy, m_sin_theta_2);
-                s11_out = cos_theta_2 * s11_in_copy + multiply_i_real(s00_in_copy, m_sin_theta_2);
+                *s_out[0] = cos_theta_2 * s00_in_copy + multiply_i_real(s11_in_copy, m_sin_theta_2);
+                *s_out[1] = cos_theta_2 * s01_in_copy + multiply_i_real(s10_in_copy, m_sin_theta_2);
+                *s_out[2] = cos_theta_2 * s10_in_copy + multiply_i_real(s01_in_copy, m_sin_theta_2);
+                *s_out[3] = cos_theta_2 * s11_in_copy + multiply_i_real(s00_in_copy, m_sin_theta_2);
             }
         };
 
@@ -1657,24 +1605,17 @@ namespace qcs
                 sin_theta_2 = sin(theta_2);
             }
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s00_in_copy = s00_in;
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
-                auto const s11_in_copy = s11_in;
+                auto const s00_in_copy = *s_in[0];
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
+                auto const s11_in_copy = *s_in[3];
 
-                s00_out = cos_theta_2 * s00_in_copy + multiply_i_real(s11_in_copy, sin_theta_2);
-                s01_out = cos_theta_2 * s01_in_copy + multiply_i_real(s10_in_copy, -sin_theta_2);
-                s10_out = cos_theta_2 * s10_in_copy + multiply_i_real(s01_in_copy, -sin_theta_2);
-                s11_out = cos_theta_2 * s11_in_copy + multiply_i_real(s00_in_copy, sin_theta_2);
+                *s_out[0] = cos_theta_2 * s00_in_copy + multiply_i_real(s11_in_copy, sin_theta_2);
+                *s_out[1] = cos_theta_2 * s01_in_copy + multiply_i_real(s10_in_copy, -sin_theta_2);
+                *s_out[2] = cos_theta_2 * s10_in_copy + multiply_i_real(s01_in_copy, -sin_theta_2);
+                *s_out[3] = cos_theta_2 * s11_in_copy + multiply_i_real(s00_in_copy, sin_theta_2);
             }
         };
 
@@ -1692,24 +1633,17 @@ namespace qcs
                 sin_theta_2 = sin(theta_2);
             }
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s00_in_copy = s00_in;
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
-                auto const s11_in_copy = s11_in;
+                auto const s00_in_copy = *s_in[0];
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
+                auto const s11_in_copy = *s_in[3];
 
-                s00_out = cos_theta_2 * s00_in_copy + multiply_i_real(s10_in_copy, -sin_theta_2);
-                s01_out = cos_theta_2 * s01_in_copy + multiply_i(s11_in_copy) * sin_theta_2;
-                s10_out = cos_theta_2 * s10_in_copy + multiply_i_real(s00_in_copy, -sin_theta_2);
-                s11_out = cos_theta_2 * s11_in_copy + multiply_i(s01_in_copy) * sin_theta_2;
+                *s_out[0] = cos_theta_2 * s00_in_copy + multiply_i_real(s10_in_copy, -sin_theta_2);
+                *s_out[1] = cos_theta_2 * s01_in_copy + multiply_i(s11_in_copy) * sin_theta_2;
+                *s_out[2] = cos_theta_2 * s10_in_copy + multiply_i_real(s00_in_copy, -sin_theta_2);
+                *s_out[3] = cos_theta_2 * s11_in_copy + multiply_i(s01_in_copy) * sin_theta_2;
             }
         };
 
@@ -1731,22 +1665,15 @@ namespace qcs
                 exp_minus_i_beta = qcs::complex_t(cos(beta), -sin(beta));
             }
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
 
-                // s00_out = s00_in;
-                s01_out = cos_theta_2 * s01_in_copy + multiply_i_real(exp_minus_i_beta * s10_in_copy, -sin_theta_2);
-                s10_out = multiply_i_real(exp_i_beta * s01_in_copy, -sin_theta_2) + cos_theta_2 * s10_in_copy;
-                // s11_out = s11_in;
+                // *s_out[0] = *s_in[0];
+                *s_out[1] = cos_theta_2 * s01_in_copy + multiply_i_real(exp_minus_i_beta * s10_in_copy, -sin_theta_2);
+                *s_out[2] = multiply_i_real(exp_i_beta * s01_in_copy, -sin_theta_2) + cos_theta_2 * s10_in_copy;
+                // *s_out[3] = *s_in[3];
             }
         };
 
@@ -1768,22 +1695,15 @@ namespace qcs
                 exp_minus_i_beta = qcs::complex_t(cos(beta), -sin(beta));
             }
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s00_in_copy = s00_in;
-                auto const s11_in_copy = s11_in;
+                auto const s00_in_copy = *s_in[0];
+                auto const s11_in_copy = *s_in[3];
 
-                s00_out = cos_theta_2 * s00_in_copy + multiply_i_real(exp_minus_i_beta * s11_in_copy, -sin_theta_2);
-                // s01_out = s01_in;
-                // s10_out = s10_in;
-                s11_out = multiply_i_real(exp_i_beta * s00_in_copy, -sin_theta_2) + cos_theta_2 * s11_in_copy;
+                *s_out[0] = cos_theta_2 * s00_in_copy + multiply_i_real(exp_minus_i_beta * s11_in_copy, -sin_theta_2);
+                // *s_out[1] = *s_in[1];
+                // *s_out[2] = *s_in[2];
+                *s_out[3] = multiply_i_real(exp_i_beta * s00_in_copy, -sin_theta_2) + cos_theta_2 * s11_in_copy;
             }
         };
 
@@ -1791,22 +1711,15 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 2;
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s10_in_copy = s10_in;
-                auto const s11_in_copy = s11_in;
-                auto const s01_in_copy = s01_in;
-                // s00_out = s00_in;
-                s01_out = s11_in_copy;
-                s10_out = s01_in_copy;
-                s11_out = s10_in_copy;
+                auto const s10_in_copy = *s_in[2];
+                auto const s11_in_copy = *s_in[3];
+                auto const s01_in_copy = *s_in[1];
+                // *s_out[0] = *s_in[0];
+                *s_out[1] = s11_in_copy;
+                *s_out[2] = s01_in_copy;
+                *s_out[3] = s10_in_copy;
             }
         };
 
@@ -1814,23 +1727,16 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 2;
 
-            __device__ void apply(qcs::complex_t const &s00_in,
-                                  qcs::complex_t const &s01_in,
-                                  qcs::complex_t const &s10_in,
-                                  qcs::complex_t const &s11_in,
-                                  qcs::complex_t &s00_out,
-                                  qcs::complex_t &s01_out,
-                                  qcs::complex_t &s10_out,
-                                  qcs::complex_t &s11_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s00_in_copy = s00_in;
-                auto const s01_in_copy = s01_in;
-                auto const s10_in_copy = s10_in;
-                auto const s11_in_copy = s11_in;
-                s00_out = M_SQRT1_2 * (s01_in_copy + multiply_i(s11_in_copy));
-                s01_out = M_SQRT1_2 * (s00_in_copy + multiply_i_m(s10_in_copy));
-                s10_out = M_SQRT1_2 * (multiply_i(s01_in_copy) + s11_in_copy);
-                s11_out = M_SQRT1_2 * (multiply_i_m(s00_in_copy) + s10_in_copy);
+                auto const s00_in_copy = *s_in[0];
+                auto const s01_in_copy = *s_in[1];
+                auto const s10_in_copy = *s_in[2];
+                auto const s11_in_copy = *s_in[3];
+                *s_out[0] = M_SQRT1_2 * (s01_in_copy + multiply_i(s11_in_copy));
+                *s_out[1] = M_SQRT1_2 * (s00_in_copy + multiply_i_m(s10_in_copy));
+                *s_out[2] = M_SQRT1_2 * (multiply_i(s01_in_copy) + s11_in_copy);
+                *s_out[3] = M_SQRT1_2 * (multiply_i_m(s00_in_copy) + s10_in_copy);
             }
         };
 
@@ -1838,34 +1744,19 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 3;
 
-            __device__ void apply(qcs::complex_t const &s000_in,
-                                  qcs::complex_t const &s001_in,
-                                  qcs::complex_t const &s010_in,
-                                  qcs::complex_t const &s011_in,
-                                  qcs::complex_t const &s100_in,
-                                  qcs::complex_t const &s101_in,
-                                  qcs::complex_t const &s110_in,
-                                  qcs::complex_t const &s111_in,
-                                  qcs::complex_t &s000_out,
-                                  qcs::complex_t &s001_out,
-                                  qcs::complex_t &s010_out,
-                                  qcs::complex_t &s011_out,
-                                  qcs::complex_t &s100_out,
-                                  qcs::complex_t &s101_out,
-                                  qcs::complex_t &s110_out,
-                                  qcs::complex_t &s111_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s111_in_copy = s111_in;
-                auto const s101_in_copy = s101_in;
-                auto const s011_in_copy = s011_in;
-                // s000_out = s000_in;
-                // s001_out = s001_in;
-                // s010_out = s010_in;
-                s011_out = multiply_i_m(s111_in_copy);
-                // s100_out = s100_in;
-                s101_out = -s101_in_copy;
-                // s110_out = s110_in;
-                s111_out = multiply_i(s011_in_copy);
+                auto const s111_in_copy = *s_in[7];
+                auto const s101_in_copy = *s_in[5];
+                auto const s011_in_copy = *s_in[3];
+                // *s_out[0] = *s_in[0];
+                // *s_out[1] = *s_in[1];
+                // *s_out[2] = *s_in[2];
+                *s_out[3] = multiply_i_m(s111_in_copy);
+                // *s_out[4] = *s_in[4];
+                *s_out[5] = -s101_in_copy;
+                // *s_out[6] = *s_in[6];
+                *s_out[7] = multiply_i(s011_in_copy);
             }
         };
 
@@ -1873,59 +1764,28 @@ namespace qcs
         {
             static constexpr unsigned int num_target_qubits = 4;
 
-            __device__ void apply(qcs::complex_t const &s0000_in,
-                                  qcs::complex_t const &s0001_in,
-                                  qcs::complex_t const &s0010_in,
-                                  qcs::complex_t const &s0011_in,
-                                  qcs::complex_t const &s0100_in,
-                                  qcs::complex_t const &s0101_in,
-                                  qcs::complex_t const &s0110_in,
-                                  qcs::complex_t const &s0111_in,
-                                  qcs::complex_t const &s1000_in,
-                                  qcs::complex_t const &s1001_in,
-                                  qcs::complex_t const &s1010_in,
-                                  qcs::complex_t const &s1011_in,
-                                  qcs::complex_t const &s1100_in,
-                                  qcs::complex_t const &s1101_in,
-                                  qcs::complex_t const &s1110_in,
-                                  qcs::complex_t const &s1111_in,
-                                  qcs::complex_t &s0000_out,
-                                  qcs::complex_t &s0001_out,
-                                  qcs::complex_t &s0010_out,
-                                  qcs::complex_t &s0011_out,
-                                  qcs::complex_t &s0100_out,
-                                  qcs::complex_t &s0101_out,
-                                  qcs::complex_t &s0110_out,
-                                  qcs::complex_t &s0111_out,
-                                  qcs::complex_t &s1000_out,
-                                  qcs::complex_t &s1001_out,
-                                  qcs::complex_t &s1010_out,
-                                  qcs::complex_t &s1011_out,
-                                  qcs::complex_t &s1100_out,
-                                  qcs::complex_t &s1101_out,
-                                  qcs::complex_t &s1110_out,
-                                  qcs::complex_t &s1111_out) const
+            __device__ void apply(qcs::complex_t const *const s_in[], qcs::complex_t *const s_out[]) const
             {
-                auto const s0011_in_copy = s0011_in;
-                auto const s1111_in_copy = s1111_in;
-                auto const s1011_in_copy = s1011_in;
-                auto const s0111_in_copy = s0111_in;
-                // s0000_out = s0000_in;
-                // s0001_out = s0001_in;
-                // s0010_out = s0010_in;
-                s0011_out = multiply_i(s0011_in_copy);
-                // s0100_out = s0100_in;
-                // s0101_out = s0101_in;
-                // s0110_out = s0110_in;
-                s0111_out = s1111_in_copy;
-                // s1000_out = s1000_in;
-                // s1001_out = s1001_in;
-                // s1010_out = s1010_in;
-                s1011_out = multiply_i_m(s1011_in_copy);
-                // s1100_out = s1100_in;
-                // s1101_out = s1101_in;
-                // s1110_out = s1110_in;
-                s1111_out = -s0111_in_copy;
+                auto const s0011_in_copy = *s_in[3];
+                auto const s1111_in_copy = *s_in[15];
+                auto const s1011_in_copy = *s_in[11];
+                auto const s0111_in_copy = *s_in[7];
+                // *s_out[0] = *s_in[0];
+                // *s_out[1] = *s_in[1];
+                // *s_out[2] = *s_in[2];
+                *s_out[3] = multiply_i(s0011_in_copy);
+                // *s_out[4] = *s_in[4];
+                // *s_out[5] = *s_in[5];
+                // *s_out[6] = *s_in[6];
+                *s_out[7] = s1111_in_copy;
+                // *s_out[8] = *s_in[8];
+                // *s_out[9] = *s_in[9];
+                // *s_out[10] = *s_in[10];
+                *s_out[11] = multiply_i_m(s1011_in_copy);
+                // *s_out[12] = *s_in[12];
+                // *s_out[13] = *s_in[13];
+                // *s_out[14] = *s_in[14];
+                *s_out[15] = -s0111_in_copy;
             }
         };
 
@@ -1958,8 +1818,10 @@ namespace qcs
         uint64_t index_state;
         thread_num_to_state_index_q0(thread_num, index_state);
 
-        qcs::complex_t const *ps_in = &qcs::kernel_common_constant.state_data_device[index_state];
-        gateobj.apply(*ps_in, qcs::kernel_common_constant.state_data_device[index_state]);
+        qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
+        qcs::complex_t const *const s_in[] = {&state[index_state]};
+        qcs::complex_t *const s_out[] = {&state[index_state]};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType, std::size_t... I>
@@ -1974,12 +1836,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 0 to 1, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2003,12 +1866,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 00 to 11, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2032,12 +1896,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 000 to 111, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2061,12 +1926,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 0000 to 1111, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2090,12 +1956,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 00000 to 11111, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2119,12 +1986,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 000000 to 111111, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2148,12 +2016,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 0000000 to 1111111, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
@@ -2177,12 +2046,13 @@ namespace qcs
         qcs::complex_t const *const state_in = state;
 
         // Basis indices run from 00000000 to 11111111, with target 0
-        // as the least significant bit. Pass all inputs before all outputs.
-        gateobj.apply(
+        // as the least significant bit.
+        qcs::complex_t const *const s_in[] = {
             ((((I ^ measured_value_bits) & is_measured_bits) == 0)
-                 ? state_in[index_state[I]]
-                 : zero_constant)...,
-            state[index_state[I]]...);
+                 ? &state_in[index_state[I]]
+                 : &zero_constant)...};
+        qcs::complex_t *const s_out[] = {&state[index_state[I]]...};
+        gateobj.apply(s_in, s_out);
     }
 
     template <typename GateType>
