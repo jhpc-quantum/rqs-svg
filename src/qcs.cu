@@ -194,10 +194,11 @@ namespace qcs
             add_target_qubit_indices<NumTargetQubits - 1>(index_state, target_qubit_num_list);
 
             uint64_t const target_mask = UINT64_C(1) << target_qubit_num_list[NumTargetQubits - 1];
-            #pragma unroll
-            for (int basis_index = 0; basis_index < (1 << (NumTargetQubits - 1)); ++basis_index)
+            constexpr int num_basis_indices = 1 << (NumTargetQubits - 1);
+            #pragma unroll num_basis_indices
+            for (int basis_index = 0; basis_index < num_basis_indices; ++basis_index)
             {
-                index_state[(1 << (NumTargetQubits - 1)) + basis_index] =
+                index_state[num_basis_indices + basis_index] =
                     index_state[basis_index] | target_mask;
             }
         }
