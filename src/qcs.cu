@@ -1825,59 +1825,21 @@ namespace qcs
     }
 
     template <typename GateType>
-    __device__ void apply_gate_q1(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[2];
-        int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q1(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
-        qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
-        qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 0 to 1, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[2];
-        qcs::complex_t *s_out[2];
-        for (int i = 0; i < 2; ++i)
-        {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
-            s_out[i] = &state[index_state[i]];
-        }
-        gateobj.apply(s_in, s_out);
-    }
-
-    template <typename GateType>
     __global__
         typename std::enable_if<GateType::num_target_qubits == 1>::type
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q1(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q2(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[4];
+        uint64_t index_state[2];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q2(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q1(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 00 to 11, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[4];
-        qcs::complex_t *s_out[4];
-        for (int i = 0; i < 4; ++i)
+        qcs::complex_t const *s_in[2];
+        qcs::complex_t *s_out[2];
+        for (int i = 0; i < 2; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -1889,29 +1851,16 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q2(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q3(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[8];
+        uint64_t index_state[4];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q3(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q2(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 000 to 111, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[8];
-        qcs::complex_t *s_out[8];
-        for (int i = 0; i < 8; ++i)
+        qcs::complex_t const *s_in[4];
+        qcs::complex_t *s_out[4];
+        for (int i = 0; i < 4; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -1923,29 +1872,16 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q3(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q4(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[16];
+        uint64_t index_state[8];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q4(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q3(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 0000 to 1111, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[16];
-        qcs::complex_t *s_out[16];
-        for (int i = 0; i < 16; ++i)
+        qcs::complex_t const *s_in[8];
+        qcs::complex_t *s_out[8];
+        for (int i = 0; i < 8; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -1957,29 +1893,16 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q4(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q5(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[32];
+        uint64_t index_state[16];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q5(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q4(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 00000 to 11111, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[32];
-        qcs::complex_t *s_out[32];
-        for (int i = 0; i < 32; ++i)
+        qcs::complex_t const *s_in[16];
+        qcs::complex_t *s_out[16];
+        for (int i = 0; i < 16; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -1991,29 +1914,16 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q5(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q6(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[64];
+        uint64_t index_state[32];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q6(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q5(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 000000 to 111111, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[64];
-        qcs::complex_t *s_out[64];
-        for (int i = 0; i < 64; ++i)
+        qcs::complex_t const *s_in[32];
+        qcs::complex_t *s_out[32];
+        for (int i = 0; i < 32; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -2025,29 +1935,16 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q6(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q7(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[128];
+        uint64_t index_state[64];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q7(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q6(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 0000000 to 1111111, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[128];
-        qcs::complex_t *s_out[128];
-        for (int i = 0; i < 128; ++i)
+        qcs::complex_t const *s_in[64];
+        qcs::complex_t *s_out[64];
+        for (int i = 0; i < 64; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -2059,29 +1956,16 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q7(gateobj, thread_num);
-    }
-
-    template <typename GateType>
-    __device__ void apply_gate_q8(GateType const &gateobj, uint64_t thread_num)
-    {
-        uint64_t index_state[256];
+        uint64_t index_state[128];
         int is_measured_bits, measured_value_bits;
-        thread_num_to_state_index_q8(
-            thread_num, index_state, is_measured_bits, measured_value_bits);
-
+        thread_num_to_state_index_q7(thread_num, index_state, is_measured_bits, measured_value_bits);
         qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
         qcs::complex_t const *const state_in = state;
-
-        // Basis indices run from 00000000 to 11111111, with target 0
-        // as the least significant bit.
-        qcs::complex_t const *s_in[256];
-        qcs::complex_t *s_out[256];
-        for (int i = 0; i < 256; ++i)
+        qcs::complex_t const *s_in[128];
+        qcs::complex_t *s_out[128];
+        for (int i = 0; i < 128; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0)
-                          ? &state_in[index_state[i]]
-                          : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -2093,7 +1977,19 @@ namespace qcs
         cuda_gate(GateType const gateobj)
     {
         uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
-        apply_gate_q8(gateobj, thread_num);
+        uint64_t index_state[256];
+        int is_measured_bits, measured_value_bits;
+        thread_num_to_state_index_q8(thread_num, index_state, is_measured_bits, measured_value_bits);
+        qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
+        qcs::complex_t const *const state_in = state;
+        qcs::complex_t const *s_in[256];
+        qcs::complex_t *s_out[256];
+        for (int i = 0; i < 256; ++i)
+        {
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
+            s_out[i] = &state[index_state[i]];
+        }
+        gateobj.apply(s_in, s_out);
     }
 
     namespace cubUtility
