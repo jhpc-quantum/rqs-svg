@@ -375,6 +375,428 @@ namespace qcs
 
     } /* thread_num_to_state_index_q4 */
 
+    static __device__ void thread_num_to_state_index_q8(
+        uint64_t thread_num,
+        uint64_t &index_state_00000000, uint64_t &index_state_00000001, uint64_t &index_state_00000010, uint64_t &index_state_00000011,
+        uint64_t &index_state_00000100, uint64_t &index_state_00000101, uint64_t &index_state_00000110, uint64_t &index_state_00000111,
+        uint64_t &index_state_00001000, uint64_t &index_state_00001001, uint64_t &index_state_00001010, uint64_t &index_state_00001011,
+        uint64_t &index_state_00001100, uint64_t &index_state_00001101, uint64_t &index_state_00001110, uint64_t &index_state_00001111,
+        uint64_t &index_state_00010000, uint64_t &index_state_00010001, uint64_t &index_state_00010010, uint64_t &index_state_00010011,
+        uint64_t &index_state_00010100, uint64_t &index_state_00010101, uint64_t &index_state_00010110, uint64_t &index_state_00010111,
+        uint64_t &index_state_00011000, uint64_t &index_state_00011001, uint64_t &index_state_00011010, uint64_t &index_state_00011011,
+        uint64_t &index_state_00011100, uint64_t &index_state_00011101, uint64_t &index_state_00011110, uint64_t &index_state_00011111,
+        uint64_t &index_state_00100000, uint64_t &index_state_00100001, uint64_t &index_state_00100010, uint64_t &index_state_00100011,
+        uint64_t &index_state_00100100, uint64_t &index_state_00100101, uint64_t &index_state_00100110, uint64_t &index_state_00100111,
+        uint64_t &index_state_00101000, uint64_t &index_state_00101001, uint64_t &index_state_00101010, uint64_t &index_state_00101011,
+        uint64_t &index_state_00101100, uint64_t &index_state_00101101, uint64_t &index_state_00101110, uint64_t &index_state_00101111,
+        uint64_t &index_state_00110000, uint64_t &index_state_00110001, uint64_t &index_state_00110010, uint64_t &index_state_00110011,
+        uint64_t &index_state_00110100, uint64_t &index_state_00110101, uint64_t &index_state_00110110, uint64_t &index_state_00110111,
+        uint64_t &index_state_00111000, uint64_t &index_state_00111001, uint64_t &index_state_00111010, uint64_t &index_state_00111011,
+        uint64_t &index_state_00111100, uint64_t &index_state_00111101, uint64_t &index_state_00111110, uint64_t &index_state_00111111,
+        uint64_t &index_state_01000000, uint64_t &index_state_01000001, uint64_t &index_state_01000010, uint64_t &index_state_01000011,
+        uint64_t &index_state_01000100, uint64_t &index_state_01000101, uint64_t &index_state_01000110, uint64_t &index_state_01000111,
+        uint64_t &index_state_01001000, uint64_t &index_state_01001001, uint64_t &index_state_01001010, uint64_t &index_state_01001011,
+        uint64_t &index_state_01001100, uint64_t &index_state_01001101, uint64_t &index_state_01001110, uint64_t &index_state_01001111,
+        uint64_t &index_state_01010000, uint64_t &index_state_01010001, uint64_t &index_state_01010010, uint64_t &index_state_01010011,
+        uint64_t &index_state_01010100, uint64_t &index_state_01010101, uint64_t &index_state_01010110, uint64_t &index_state_01010111,
+        uint64_t &index_state_01011000, uint64_t &index_state_01011001, uint64_t &index_state_01011010, uint64_t &index_state_01011011,
+        uint64_t &index_state_01011100, uint64_t &index_state_01011101, uint64_t &index_state_01011110, uint64_t &index_state_01011111,
+        uint64_t &index_state_01100000, uint64_t &index_state_01100001, uint64_t &index_state_01100010, uint64_t &index_state_01100011,
+        uint64_t &index_state_01100100, uint64_t &index_state_01100101, uint64_t &index_state_01100110, uint64_t &index_state_01100111,
+        uint64_t &index_state_01101000, uint64_t &index_state_01101001, uint64_t &index_state_01101010, uint64_t &index_state_01101011,
+        uint64_t &index_state_01101100, uint64_t &index_state_01101101, uint64_t &index_state_01101110, uint64_t &index_state_01101111,
+        uint64_t &index_state_01110000, uint64_t &index_state_01110001, uint64_t &index_state_01110010, uint64_t &index_state_01110011,
+        uint64_t &index_state_01110100, uint64_t &index_state_01110101, uint64_t &index_state_01110110, uint64_t &index_state_01110111,
+        uint64_t &index_state_01111000, uint64_t &index_state_01111001, uint64_t &index_state_01111010, uint64_t &index_state_01111011,
+        uint64_t &index_state_01111100, uint64_t &index_state_01111101, uint64_t &index_state_01111110, uint64_t &index_state_01111111,
+        uint64_t &index_state_10000000, uint64_t &index_state_10000001, uint64_t &index_state_10000010, uint64_t &index_state_10000011,
+        uint64_t &index_state_10000100, uint64_t &index_state_10000101, uint64_t &index_state_10000110, uint64_t &index_state_10000111,
+        uint64_t &index_state_10001000, uint64_t &index_state_10001001, uint64_t &index_state_10001010, uint64_t &index_state_10001011,
+        uint64_t &index_state_10001100, uint64_t &index_state_10001101, uint64_t &index_state_10001110, uint64_t &index_state_10001111,
+        uint64_t &index_state_10010000, uint64_t &index_state_10010001, uint64_t &index_state_10010010, uint64_t &index_state_10010011,
+        uint64_t &index_state_10010100, uint64_t &index_state_10010101, uint64_t &index_state_10010110, uint64_t &index_state_10010111,
+        uint64_t &index_state_10011000, uint64_t &index_state_10011001, uint64_t &index_state_10011010, uint64_t &index_state_10011011,
+        uint64_t &index_state_10011100, uint64_t &index_state_10011101, uint64_t &index_state_10011110, uint64_t &index_state_10011111,
+        uint64_t &index_state_10100000, uint64_t &index_state_10100001, uint64_t &index_state_10100010, uint64_t &index_state_10100011,
+        uint64_t &index_state_10100100, uint64_t &index_state_10100101, uint64_t &index_state_10100110, uint64_t &index_state_10100111,
+        uint64_t &index_state_10101000, uint64_t &index_state_10101001, uint64_t &index_state_10101010, uint64_t &index_state_10101011,
+        uint64_t &index_state_10101100, uint64_t &index_state_10101101, uint64_t &index_state_10101110, uint64_t &index_state_10101111,
+        uint64_t &index_state_10110000, uint64_t &index_state_10110001, uint64_t &index_state_10110010, uint64_t &index_state_10110011,
+        uint64_t &index_state_10110100, uint64_t &index_state_10110101, uint64_t &index_state_10110110, uint64_t &index_state_10110111,
+        uint64_t &index_state_10111000, uint64_t &index_state_10111001, uint64_t &index_state_10111010, uint64_t &index_state_10111011,
+        uint64_t &index_state_10111100, uint64_t &index_state_10111101, uint64_t &index_state_10111110, uint64_t &index_state_10111111,
+        uint64_t &index_state_11000000, uint64_t &index_state_11000001, uint64_t &index_state_11000010, uint64_t &index_state_11000011,
+        uint64_t &index_state_11000100, uint64_t &index_state_11000101, uint64_t &index_state_11000110, uint64_t &index_state_11000111,
+        uint64_t &index_state_11001000, uint64_t &index_state_11001001, uint64_t &index_state_11001010, uint64_t &index_state_11001011,
+        uint64_t &index_state_11001100, uint64_t &index_state_11001101, uint64_t &index_state_11001110, uint64_t &index_state_11001111,
+        uint64_t &index_state_11010000, uint64_t &index_state_11010001, uint64_t &index_state_11010010, uint64_t &index_state_11010011,
+        uint64_t &index_state_11010100, uint64_t &index_state_11010101, uint64_t &index_state_11010110, uint64_t &index_state_11010111,
+        uint64_t &index_state_11011000, uint64_t &index_state_11011001, uint64_t &index_state_11011010, uint64_t &index_state_11011011,
+        uint64_t &index_state_11011100, uint64_t &index_state_11011101, uint64_t &index_state_11011110, uint64_t &index_state_11011111,
+        uint64_t &index_state_11100000, uint64_t &index_state_11100001, uint64_t &index_state_11100010, uint64_t &index_state_11100011,
+        uint64_t &index_state_11100100, uint64_t &index_state_11100101, uint64_t &index_state_11100110, uint64_t &index_state_11100111,
+        uint64_t &index_state_11101000, uint64_t &index_state_11101001, uint64_t &index_state_11101010, uint64_t &index_state_11101011,
+        uint64_t &index_state_11101100, uint64_t &index_state_11101101, uint64_t &index_state_11101110, uint64_t &index_state_11101111,
+        uint64_t &index_state_11110000, uint64_t &index_state_11110001, uint64_t &index_state_11110010, uint64_t &index_state_11110011,
+        uint64_t &index_state_11110100, uint64_t &index_state_11110101, uint64_t &index_state_11110110, uint64_t &index_state_11110111,
+        uint64_t &index_state_11111000, uint64_t &index_state_11111001, uint64_t &index_state_11111010, uint64_t &index_state_11111011,
+        uint64_t &index_state_11111100, uint64_t &index_state_11111101, uint64_t &index_state_11111110, uint64_t &index_state_11111111,
+        int &is_measured_bits, int &measured_value_bits)
+    {
+        auto args = (qcs::kernel_input_qnlist_struct const *)(void *)qcs::kernel_input_constant;
+
+        index_state_00000000 = 0;
+
+        int const num_operand_qubits = args->get_num_operand_qubits();
+        int const *const qubit_num_list_sorted = args->get_operand_qubit_num_list_sorted();
+
+        // generate index_state_00000000
+        // ignoring positive control qubits
+        uint64_t lower_mask = 0;
+        for (int i = 0; i < num_operand_qubits; i++)
+        {
+            uint64_t const mask = (UINT64_C(1) << (qubit_num_list_sorted[i] - i)) - 1;
+            uint64_t const upper_mask = mask & ~lower_mask;
+            lower_mask = mask;
+            index_state_00000000 |= (thread_num & upper_mask) << i;
+        }
+        index_state_00000000 |= (thread_num & ~lower_mask) << num_operand_qubits;
+
+        // update index_state_00000000
+        // considering positive control qubits
+        int const *const positive_control_qubit_num_list = args->get_positive_control_qubit_num_list();
+        for (int i = 0; i < args->num_positive_control_qubits; i++)
+        {
+            index_state_00000000 |= UINT64_C(1) << positive_control_qubit_num_list[i];
+        }
+
+        // generate other indices
+        auto target_qubit_num_list = args->get_target_qubit_num_list();
+
+        index_state_00000001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00000010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00000011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00000100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00000101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00000110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00000111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00001000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_00001001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00001010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00001011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00001100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00001101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00001110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00001111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00010000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_00010001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00010010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00010011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00010100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00010101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00010110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00010111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00011000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_00011001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00011010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00011011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00011100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00011101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00011110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00011111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00100000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]);
+        index_state_00100001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00100010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00100011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00100100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00100101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00100110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00100111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00101000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_00101001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00101010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00101011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00101100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00101101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00101110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00101111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00110000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_00110001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00110010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00110011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00110100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00110101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00110110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00110111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00111000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_00111001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00111010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00111011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_00111100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_00111101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_00111110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_00111111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01000000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]);
+        index_state_01000001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01000010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01000011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01000100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01000101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01000110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01000111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01001000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_01001001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01001010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01001011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01001100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01001101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01001110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01001111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01010000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_01010001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01010010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01010011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01010100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01010101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01010110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01010111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01011000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_01011001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01011010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01011011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01011100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01011101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01011110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01011111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01100000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]);
+        index_state_01100001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01100010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01100011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01100100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01100101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01100110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01100111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01101000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_01101001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01101010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01101011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01101100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01101101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01101110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01101111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01110000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_01110001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01110010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01110011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01110100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01110101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01110110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01110111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01111000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_01111001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01111010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01111011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_01111100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_01111101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_01111110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_01111111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10000000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]);
+        index_state_10000001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10000010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10000011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10000100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10000101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10000110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10000111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10001000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_10001001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10001010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10001011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10001100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10001101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10001110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10001111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10010000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_10010001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10010010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10010011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10010100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10010101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10010110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10010111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10011000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_10011001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10011010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10011011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10011100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10011101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10011110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10011111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10100000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]);
+        index_state_10100001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10100010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10100011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10100100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10100101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10100110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10100111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10101000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_10101001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10101010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10101011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10101100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10101101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10101110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10101111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10110000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_10110001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10110010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10110011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10110100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10110101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10110110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10110111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10111000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_10111001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10111010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10111011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_10111100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_10111101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_10111110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_10111111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11000000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]);
+        index_state_11000001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11000010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11000011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11000100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11000101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11000110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11000111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11001000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_11001001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11001010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11001011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11001100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11001101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11001110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11001111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11010000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_11010001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11010010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11010011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11010100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11010101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11010110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11010111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11011000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_11011001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11011010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11011011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11011100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11011101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11011110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11011111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11100000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]);
+        index_state_11100001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11100010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11100011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11100100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11100101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11100110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11100111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11101000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_11101001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11101010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11101011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11101100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11101101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11101110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11101111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11110000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]);
+        index_state_11110001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11110010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11110011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11110100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11110101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11110110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11110111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11111000 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]);
+        index_state_11111001 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11111010 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11111011 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        index_state_11111100 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]);
+        index_state_11111101 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[0]);
+        index_state_11111110 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]);
+        index_state_11111111 = index_state_00000000 | (UINT64_C(1) << target_qubit_num_list[7]) | (UINT64_C(1) << target_qubit_num_list[6]) | (UINT64_C(1) << target_qubit_num_list[5]) | (UINT64_C(1) << target_qubit_num_list[4]) | (UINT64_C(1) << target_qubit_num_list[3]) | (UINT64_C(1) << target_qubit_num_list[2]) | (UINT64_C(1) << target_qubit_num_list[1]) | (UINT64_C(1) << target_qubit_num_list[0]);
+
+        is_measured_bits = args->is_measured_bits;
+        measured_value_bits = args->measured_value_bits;
+
+    } /* thread_num_to_state_index_q8 */
+
     namespace gate
     {
 
