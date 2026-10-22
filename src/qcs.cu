@@ -2128,6 +2128,35 @@ namespace qcs
             qcs::kernel_common_constant.state_data_device[index_state_1111]);
     }
 
+    template <typename GateType, std::size_t... I>
+    __device__ void apply_gate_q8(GateType const &gateobj, uint64_t thread_num, std::index_sequence<I...>)
+    {
+        uint64_t index_state[256];
+        int is_measured_bits, measured_value_bits;
+        thread_num_to_state_index_q8(
+            thread_num, index_state[I]..., is_measured_bits, measured_value_bits);
+
+        qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
+        qcs::complex_t const *const state_in = state;
+
+        // Basis indices run from 00000000 to 11111111, with target 0
+        // as the least significant bit. Pass all inputs before all outputs.
+        gateobj.apply(
+            ((((I ^ measured_value_bits) & is_measured_bits) == 0)
+                 ? state_in[index_state[I]]
+                 : zero_constant)...,
+            state[index_state[I]]...);
+    }
+
+    template <typename GateType>
+    __global__
+        typename std::enable_if<GateType::num_target_qubits == 8>::type
+        cuda_gate(GateType const gateobj)
+    {
+        uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
+        apply_gate_q8(gateobj, thread_num, std::make_index_sequence<256>{});
+    }
+
     namespace cubUtility
     {
 
