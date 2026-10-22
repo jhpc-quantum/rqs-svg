@@ -2248,21 +2248,41 @@ static std::vector<int> qcs_vector_from_array(bit_num_t const *values, bit_num_t
     return std::vector<int>(values, values + count);
 }
 
-template <unsigned int num_swaps = 1>
+template <size_t swap_index>
+static bool qcs_simulator_try_operate_swap(
+    qcs_simulator *sim, bit_num_t target_qubit_num_count,
+    std::vector<int> const &targets,
+    std::vector<int> const &negctrls,
+    std::vector<int> const &ctrls)
+{
+    constexpr unsigned int num_swaps = swap_index + 1;
+    if (target_qubit_num_count != 2 * num_swaps)
+        return false;
+
+    sim->core->operate_gate(qcs::gate::swap<num_swaps>(), targets, negctrls, ctrls);
+    return true;
+}
+
+template <size_t... swap_indices>
+static bool qcs_simulator_try_operate_swap(
+    qcs_simulator *sim, bit_num_t target_qubit_num_count,
+    std::vector<int> const &targets,
+    std::vector<int> const &negctrls,
+    std::vector<int> const &ctrls,
+    std::index_sequence<swap_indices...>)
+{
+    return (qcs_simulator_try_operate_swap<swap_indices>(
+                sim, target_qubit_num_count, targets, negctrls, ctrls) || ...);
+}
+
 static void qcs_simulator_operate_swap(qcs_simulator *sim, bit_num_t target_qubit_num_count,
                                        std::vector<int> const &targets,
                                        std::vector<int> const &negctrls,
                                        std::vector<int> const &ctrls)
 {
-    if (target_qubit_num_count == 2 * num_swaps)
-    {
-        sim->core->operate_gate(qcs::gate::swap<num_swaps>(), targets, negctrls, ctrls);
-    }
-    else if constexpr (num_swaps < qcs::gate::max_num_swaps)
-    {
-        qcs_simulator_operate_swap<num_swaps + 1>(sim, target_qubit_num_count, targets, negctrls, ctrls);
-    }
-    else
+    if (!qcs_simulator_try_operate_swap(
+            sim, target_qubit_num_count, targets, negctrls, ctrls,
+            std::make_index_sequence<qcs::gate::max_num_swaps>{}))
     {
         throw std::runtime_error("SWAP target count must be an even number from 2 through 2 * max_num_swaps");
     }
