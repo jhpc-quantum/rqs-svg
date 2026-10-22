@@ -184,17 +184,17 @@ namespace qcs
 
     } /* thread_num_to_state_index_q0 */
 
-    template <int NumTargetQubits>
+    template <int num_target_qubits>
     static __device__ void add_target_qubit_indices(
         uint64_t *index_state,
         int const *target_qubit_num_list)
     {
-        if constexpr (NumTargetQubits > 0)
+        if constexpr (num_target_qubits > 0)
         {
-            add_target_qubit_indices<NumTargetQubits - 1>(index_state, target_qubit_num_list);
+            add_target_qubit_indices<num_target_qubits - 1>(index_state, target_qubit_num_list);
 
-            uint64_t const target_mask = UINT64_C(1) << target_qubit_num_list[NumTargetQubits - 1];
-            constexpr int num_basis_indices = 1 << (NumTargetQubits - 1);
+            uint64_t const target_mask = UINT64_C(1) << target_qubit_num_list[num_target_qubits - 1];
+            constexpr int num_basis_indices = 1 << (num_target_qubits - 1);
             #pragma unroll num_basis_indices
             for (int basis_index = 0; basis_index < num_basis_indices; ++basis_index)
             {
@@ -204,14 +204,14 @@ namespace qcs
         }
     }
 
-    template <int NumTargetQubits>
+    template <int num_target_qubits>
     static __device__ void thread_num_to_state_index(
         uint64_t thread_num,
         uint64_t *index_state,
         int &is_measured_bits, int &measured_value_bits)
     {
-        static_assert(NumTargetQubits >= 1 && NumTargetQubits <= 8,
-                      "NumTargetQubits must be between 1 and 8");
+        static_assert(num_target_qubits >= 1 && num_target_qubits <= 8,
+                      "num_target_qubits must be between 1 and 8");
 
         thread_num_to_state_index_q0(thread_num, index_state[0]);
 
@@ -219,7 +219,7 @@ namespace qcs
         int const *const target_qubit_num_list = args->get_target_qubit_num_list();
 
         // Add target bits in ascending basis-index order, with target 0 as LSB.
-        add_target_qubit_indices<NumTargetQubits>(index_state, target_qubit_num_list);
+        add_target_qubit_indices<num_target_qubits>(index_state, target_qubit_num_list);
 
         is_measured_bits = args->is_measured_bits;
         measured_value_bits = args->measured_value_bits;
