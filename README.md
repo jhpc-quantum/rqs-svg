@@ -84,12 +84,6 @@ settings such as `NVSHMEM_IB_ENABLE_IBGDA` are left to the environment. XOR peer
 rounds support exchanges involving multiple global qubits; a stream barrier
 separates rounds before staging buffers are reused with a different peer.
 
-The existing localization host check can be run without CUDA:
-
-```sh
-python3 tests/test_localize_target_qubits.py
-```
-
 CUDA compilation and NVSHMEM transport behavior require a target-system build
 and execution.
 
