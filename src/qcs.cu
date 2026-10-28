@@ -1488,7 +1488,7 @@ namespace qcs
 
         } /* prepare_control_qubit_num_list */
 
-        void ensure_local_qubits()
+        void localize_target_qubits()
         {
             target_qubit_num_physical_list.resize(target_qubit_num_logical_list.size());
             for (int tqni = 0; tqni < target_qubit_num_logical_list.size(); tqni++)
@@ -1611,7 +1611,7 @@ namespace qcs
 
                 // target_qubit_num_physical = swap_target_local;
             }
-        }; /* ensure_local_qubits */
+        }; /* localize_target_qubits */
 
         void check_control_qubit_num_physical()
         {
@@ -1880,8 +1880,8 @@ namespace qcs
             negative_control_qubit_num_logical_list = measured_0_qubit_num_logical_list;
 
             // A global measurement does not need a statevector exchange.  Keeping
-            // ensure_local_qubits() here clears its working lists for both paths.
-            ensure_local_qubits();
+            // localize_target_qubits() here clears its working lists for both paths.
+            localize_target_qubits();
             check_control_qubit_num_physical();
             prepare_operating_gate();
 
@@ -2009,7 +2009,7 @@ namespace qcs
             if (!measured_control_condition)
                 return;
 
-            ensure_local_qubits();
+            localize_target_qubits();
             materialize_pending_projection(release_mask);
             assert((pending_projection_mask_logical & target_mask) == 0);
             check_control_qubit_num_physical();
