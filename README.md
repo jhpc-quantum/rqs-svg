@@ -40,6 +40,53 @@ source ./env.bash
 
 The setup file appends this repository's absolute `lib` directory path to `LD_LIBRARY_PATH`.
 
+## Selecting the qubit-exchange method
+
+NCCL remains the default. To enable the registered PUT algorithm (method 2 in
+`buffer-swap/src/nvshmem_swap_bench.cu`), build with NVSHMEM support:
+
+```sh
+make clean
+make USE_NVSHMEM=1
+```
+
+Add the NVSHMEM include and library directories to `CFLAGS_VENDOR` and
+`LDFLAGS_VENDOR` in `config.mk`, alongside the existing CUDA/MPI/NCCL settings.
+The build adds relocatable device code and links `nvshmem_host` and
+`nvshmem_device`. Use an NVSHMEM version providing `nvshmemx_buffer_register`.
+Its shared libraries must also be available on the runtime library path.
+Rebuild after changing `USE_NVSHMEM`.
+
+Select the method before creating the simulator, including when using the C or
+Python library API. Set the same value on every MPI rank:
+
+```sh
+export QCS_SWAP_METHOD=2
+export NVSHMEM_SYMMETRIC_SIZE=128M
+mpirun -np 2 ./bin/qcs user_circuit.so
+```
+
+Unset `QCS_SWAP_METHOD`, or set it to `nccl` or `0`, to use NCCL. A build without
+NVSHMEM rejects method `2` with an error. Values `1` and `3` from the benchmark
+are not implemented in the simulator.
+
+Method 2 registers the CUDA statevector outside the symmetric heap. The heap
+holds staging buffers and signals: reserve at least 256 KiB plus 8 bytes per
+block, with additional allocator headroom. There is one allocated block per SM
+of the smallest GPU in the MPI job; the launch grid is capped by cooperative
+launch capacity. `128M` is an example heap size; increase it if needed. Transfers
+use chunks of up to 256 KiB, shortened at qubit-region boundaries.
+
+This method requires a power-of-two number of ranks, distinct GPUs per local
+rank, and Volta-or-newer GPUs supporting cooperative launch. All ranks must use
+the same qubit count, mapping, and sequence of simulator operations. Transport
+settings such as `NVSHMEM_IB_ENABLE_IBGDA` are left to the environment. XOR peer
+rounds support exchanges involving multiple global qubits; a stream barrier
+separates rounds before staging buffers are reused with a different peer.
+
+CUDA compilation and NVSHMEM transport behavior require a target-system build
+and execution.
+
 ## Compiling Circuit
 
 Use the helper script:
