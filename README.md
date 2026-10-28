@@ -120,6 +120,49 @@ All MPI ranks must invoke a measurement with the same ordered lists.  A later
 measurement observes the already selected branch; prepare the state again for
 an independent shot.
 
+Measurements use groups of two qubits, with a single-qubit remainder for odd
+counts. Each group containing unmeasured qubits computes joint probabilities
+with one CUB reduction per participating rank, then one MPI probability sum
+and one result broadcast. The first target is the
+least significant bit of the internal joint outcome. Already measured qubits
+retain their values, and projection remains deferred until needed by a gate or
+statevector output. Global targets use rank bits without exchanging the
+statevector.
+
+The internal `measure_qubits<N>` and `IndirectLoad<N, L>` templates support
+widths 1–4, where `L` counts unmeasured local targets. `measure_group_size` in
+`src/qcs.cu` selects the production grouping width; the public C API is unchanged.
+The device result buffer grows to `sizeof(MeasureNorm<N>)` as needed, and CUB
+scratch requirements are queried for each reduction configuration. Both buffers
+are reused. Wider groups increase reduction storage exponentially and are not
+necessarily faster. Joint sampling preserves probability distributions, but
+consumes fewer random draws, so seeded results can differ from sequential
+measurement.
+
+### Measurement tests
+
+With the normal CUDA/MPI/NCCL/atlc build configuration, run:
+
+```sh
+make test-measurement TEST_NP=1
+make test-measurement TEST_NP=2
+make test-measurement TEST_NP=4
+make test-measurement TEST_NP=8
+```
+
+Each rank needs its own visible GPU on its host, as in the simulator. Two ranks
+exercise mixed targets, four allow two global targets, and eight allow three
+global targets. Tests cover basis states, Bell, uniform and weighted states,
+GHZ through `measure_qubits<3>`, remapping, repeated/partial measurements,
+deferred projection, gates after measurement, odd groups, classical outputs,
+invalid norms and statistical agreement with sequential measurement.
+
+Without CUDA or MPI, `make test-measurement-host` compiles the production
+index-generation, loader and sampling helpers with host type aliases and
+compares them against direct statevector enumeration. It also checks grouping,
+measurement bookkeeping and buffer reuse with synchronous CUB/CUDA/MPI stubs.
+These checks do not validate actual CUB algorithms, GPU execution or MPI.
+
 ## Running
 
 You can execute the built simulator via:
