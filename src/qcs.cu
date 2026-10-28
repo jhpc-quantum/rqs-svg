@@ -1250,33 +1250,7 @@ namespace qcs
             qcs_kernel_common_host.state_data_device = state_data_device;
             ATLC_CHECK_CUDA(cudaMemcpyAsync, qcs_kernel_common_constant_addr, &qcs_kernel_common_host, sizeof(qcs::kernel_common_struct), cudaMemcpyHostToDevice, stream);
 
-            uint64_t const allocatable_states = (uint64_t)initial_free_memory_bytes >> 4;
-            if (allocatable_states > num_states_local)
-            {
-                uint64_t const swap_buffer_total_length_avail = allocatable_states - num_states_local;
-                int const log_swap_buffer_total_length_avail = atlc::log2_int(swap_buffer_total_length_avail);
-                if (log_swap_buffer_total_length_avail >= num_qubits_local - 1)
-                {
-                    log_swap_buffer_total_length = num_qubits_local - 1;
-                }
-                else
-                {
-                    log_swap_buffer_total_length = log_swap_buffer_total_length_avail;
-                    fprintf(
-                        stderr,
-                        "[warn] swap buffer length reduced due to free memory limit (log=%d, target=%d).\n",
-                        log_swap_buffer_total_length,
-                        num_qubits_local - 1);
-                }
-            }
-            else
-            {
-                log_swap_buffer_total_length = 0;
-                fprintf(
-                    stderr,
-                    "[warn] insufficient free memory for additional swap buffer allocation (bytes=%zu).\n",
-                    initial_free_memory_bytes);
-            }
+            log_swap_buffer_total_length = 20; // 2^20 complex values * 16 bytes = 16 MiB.
             swap_buffer_total_length = UINT64_C(1) << log_swap_buffer_total_length;
             ATLC_CHECK_CUDA(cudaMallocAsync, &swap_buffer, swap_buffer_total_length * sizeof(qcs::complex_t), stream);
 
