@@ -2038,23 +2038,42 @@ namespace qcs
             return static_cast<int>(measure_qubits<1>({qubit}));
         }
 
+        template <size_t group_index>
+        bool try_measure_qubit_group(const std::vector<int> &qubits, std::vector<bit_t> &results,
+                                     size_t offset, size_t group_size)
+        {
+            constexpr int GroupSize = group_index + 1;
+            if (group_size != GroupSize)
+                return false;
+
+            std::array<int, GroupSize> group;
+            std::copy_n(qubits.begin() + offset, GroupSize, group.begin());
+            uint64_t const outcome = measure_qubits<GroupSize>(group);
+            for (int bit = 0; bit < GroupSize; ++bit)
+                results[offset + bit] = static_cast<bit_t>((outcome >> bit) & 1);
+            return true;
+        }
+
+        template <size_t... group_indices>
+        bool try_measure_qubit_group(const std::vector<int> &qubits, std::vector<bit_t> &results,
+                                     size_t offset, size_t group_size,
+                                     std::index_sequence<group_indices...>)
+        {
+            return (try_measure_qubit_group<group_indices>(qubits, results, offset, group_size) || ...);
+        }
+
         template <int GroupSize = measure_group_size>
         void measure_qubit_groups(const std::vector<int> &qubits, std::vector<bit_t> &results, size_t offset = 0)
         {
             static_assert(GroupSize >= 1 && GroupSize <= max_measure_qubits);
-            size_t i = offset;
-            for (; i + GroupSize <= qubits.size(); i += GroupSize)
+            for (size_t i = offset; i < qubits.size(); i += GroupSize)
             {
-                std::array<int, GroupSize> group;
-                std::copy_n(qubits.begin() + i, GroupSize, group.begin());
-                uint64_t const outcome = measure_qubits<GroupSize>(group);
-                for (int bit = 0; bit < GroupSize; ++bit)
-                    results[i + bit] = static_cast<bit_t>((outcome >> bit) & 1);
-            }
-            if constexpr (GroupSize > 1)
-            {
-                if (i < qubits.size())
-                    measure_qubit_groups<GroupSize - 1>(qubits, results, i);
+                size_t const group_size = std::min<size_t>(GroupSize, qubits.size() - i);
+                if (!try_measure_qubit_group(qubits, results, i, group_size,
+                                             std::make_index_sequence<GroupSize>{}))
+                {
+                    throw std::runtime_error("invalid measurement group size");
+                }
             }
         }
 
