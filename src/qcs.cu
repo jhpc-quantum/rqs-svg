@@ -1571,7 +1571,7 @@ namespace qcs
             for (uint64_t local_num_self = 0; local_num_self < num_local_areas; local_num_self++)
             {
 
-                // global_swap_peer = OR_i (local_num_selfのb_delta_i桁目)をa_delta_i桁目にする
+                // global_swap_peer = OR_i (the b_delta_i-th bit of local_num_self) placed at the a_delta_i-th bit
                 uint64_t global_swap_peer = 0;
                 for (int target_num = 0; target_num < num_swap_qubits; target_num++)
                 {
@@ -1580,9 +1580,9 @@ namespace qcs
                     // b_delta_i
                     int const swap_target_local_delta = swap_target_local_list[target_num] - swap_target_local_min;
                     global_swap_peer |=
-                        // local_num_selfのb_delta_i桁目
+                        // The b_delta_i-th bit of local_num_self
                         ((local_num_self >> swap_target_local_delta) & 1)
-                        // をa_delta_i桁目にする
+                        // Place it at the a_delta_i-th bit
                         << swap_target_global_delta;
                 }
 
