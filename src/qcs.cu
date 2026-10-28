@@ -52,8 +52,8 @@ namespace qcs
 
     typedef double float_t;
     typedef cuda::std::complex<qcs::float_t> complex_t;
-    constexpr int max_measure_qubits = 4;
-    constexpr int measure_group_size = 2;
+    constexpr int max_measure_qubits = 8;
+    constexpr int measure_group_size = max_measure_qubits;
 
     template <int N>
     using MeasureNorm = cuda::std::array<qcs::float_t, (1 << N)>;
@@ -2039,10 +2039,10 @@ namespace qcs
         }
 
         template <int GroupSize = measure_group_size>
-        void measure_qubit_groups(const std::vector<int> &qubits, std::vector<bit_t> &results)
+        void measure_qubit_groups(const std::vector<int> &qubits, std::vector<bit_t> &results, size_t offset = 0)
         {
             static_assert(GroupSize >= 1 && GroupSize <= max_measure_qubits);
-            size_t i = 0;
+            size_t i = offset;
             for (; i + GroupSize <= qubits.size(); i += GroupSize)
             {
                 std::array<int, GroupSize> group;
@@ -2051,8 +2051,11 @@ namespace qcs
                 for (int bit = 0; bit < GroupSize; ++bit)
                     results[i + bit] = static_cast<bit_t>((outcome >> bit) & 1);
             }
-            for (; i < qubits.size(); ++i)
-                results[i] = static_cast<bit_t>(measure_qubit(qubits[i]));
+            if constexpr (GroupSize > 1)
+            {
+                if (i < qubits.size())
+                    measure_qubit_groups<GroupSize - 1>(qubits, results, i);
+            }
         }
 
         template <typename GateType>

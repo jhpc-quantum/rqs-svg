@@ -120,10 +120,10 @@ All MPI ranks must invoke a measurement with the same ordered lists.  A later
 measurement observes the already selected branch; prepare the state again for
 an independent shot.
 
-Measurements use groups of two qubits, with a single-qubit remainder for odd
-counts. Each group containing unmeasured qubits computes joint probabilities
-with one CUB reduction per participating rank, then one MPI probability sum
-and one result broadcast. The first target is the
+Measurements use groups of up to eight qubits, with any remainder measured
+together as a smaller group. Each group containing unmeasured qubits computes
+joint probabilities with one CUB reduction per participating rank, then one MPI
+probability sum and one result broadcast. The first target is the
 least significant bit of the internal joint outcome. Already measured qubits
 retain their values, and projection remains deferred until needed by a gate or
 statevector output. Global targets use rank bits without exchanging the
