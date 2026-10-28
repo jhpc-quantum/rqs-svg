@@ -1092,7 +1092,6 @@ namespace qcs
 
         int log_num_procs;
         int max_num_qubits_local_device;
-        uint64_t initial_free_memory_bytes;
         int log_block_size_max;
         int block_size_max;
         int target_qubit_num_begin;
@@ -1157,8 +1156,7 @@ namespace qcs
 
         simulator_core() : num_qubits(0),
                            use_unified_memory(false),
-                           num_rand_areas(1),
-                           initial_free_memory_bytes(0)
+                           num_rand_areas(1)
         {
         }
 
@@ -1186,20 +1184,6 @@ namespace qcs
             gpu_id = my_node_local_rank;
             ATLC_CHECK_CUDA(cudaSetDevice, gpu_id);
 
-            size_t total_memory_bytes = 0;
-            size_t free_memory_bytes = 0;
-            ATLC_CHECK_CUDA(cudaMemGetInfo, &free_memory_bytes, &total_memory_bytes);
-
-            uint64_t const used_memory_bytes = (uint64_t)total_memory_bytes - (uint64_t)free_memory_bytes;
-            if (used_memory_bytes > (UINT64_C(1) << 27))
-            {
-                fprintf(
-                    stderr,
-                    "[warn] GPU memory already in use before allocations: %.2f GiB (used=%" PRIu64 " bytes, total=%zu bytes).\n",
-                    (double)used_memory_bytes / (double)(UINT64_C(1) << 30),
-                    used_memory_bytes,
-                    total_memory_bytes);
-            }
 
 #ifdef QCS_USE_NVSHMEM
             if (swap_method == 2)
@@ -1316,12 +1300,7 @@ namespace qcs
             }
 #endif
 
-            size_t total_memory_bytes = 0;
-            size_t free_memory_bytes = 0;
-            ATLC_CHECK_CUDA(cudaMemGetInfo, &free_memory_bytes, &total_memory_bytes);
-            initial_free_memory_bytes = free_memory_bytes;
-
-            max_num_qubits_local_device = atlc::log2_int((uint64_t)initial_free_memory_bytes >> 4);
+            max_num_qubits_local_device = atlc::log2_int(UINT64_C(1) << (sizeof(size_t) * 8 - 4));
             if (proc_num == 0 && max_num_qubits_local_device > qcs::max_num_qubits_local)
             {
                 fprintf(
@@ -1417,34 +1396,7 @@ namespace qcs
             else
 #endif
             {
-                uint64_t const allocatable_states = (uint64_t)initial_free_memory_bytes >> 4;
-                if (allocatable_states > num_states_local)
-                {
-                    uint64_t const swap_buffer_total_length_avail = allocatable_states - num_states_local;
-                    int const log_swap_buffer_total_length_avail = atlc::log2_int(swap_buffer_total_length_avail);
-                    if (log_swap_buffer_total_length_avail >= num_qubits_local - 1)
-                    {
-                        log_swap_buffer_total_length = num_qubits_local - 1;
-                    }
-                    else
-                    {
-                        log_swap_buffer_total_length = log_swap_buffer_total_length_avail;
-                        fprintf(
-                            stderr,
-                            "[warn] swap buffer length reduced due to free memory limit (log=%d, target=%d).\n",
-                            log_swap_buffer_total_length,
-                            num_qubits_local - 1);
-                    }
-                }
-                else
-                {
-                    log_swap_buffer_total_length = 0;
-                    fprintf(
-                        stderr,
-                        "[warn] insufficient free memory for additional swap buffer allocation (bytes=%zu).\n",
-                        initial_free_memory_bytes);
-                }
-                swap_buffer_total_length = UINT64_C(1) << log_swap_buffer_total_length;
+                swap_buffer_total_length = (UINT64_C(16) * 1024 * 1024) / sizeof(qcs::complex_t);
                 ATLC_CHECK_CUDA(cudaMallocAsync, &swap_buffer, swap_buffer_total_length * sizeof(qcs::complex_t), stream);
             }
 
