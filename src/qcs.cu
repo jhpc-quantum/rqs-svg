@@ -1490,6 +1490,11 @@ namespace qcs
 
         void localize_target_qubits()
         {
+            if (target_qubit_num_logical_list.size() > num_qubits_local)
+            {
+                throw std::runtime_error("number of target qubits exceeds number of local qubits");
+            }
+
             target_qubit_num_physical_list.resize(target_qubit_num_logical_list.size());
             for (int tqni = 0; tqni < target_qubit_num_logical_list.size(); tqni++)
             {
@@ -1498,15 +1503,26 @@ namespace qcs
 
             swap_target_global_list.resize(0);
             swap_target_local_list.resize(0);
+            int swap_target_local = num_qubits_local - 1;
             for (int tqni = 0; tqni < target_qubit_num_physical_list.size(); tqni++)
             {
                 auto const tqn_i = target_qubit_num_physical_list[tqni];
                 if (tqn_i >= num_qubits_local)
                 {
+                    // Keep existing local targets local, including those later in the list.
+                    while (swap_target_local >= 0 &&
+                           std::find(target_qubit_num_physical_list.begin(), target_qubit_num_physical_list.end(), swap_target_local) != target_qubit_num_physical_list.end())
+                    {
+                        --swap_target_local;
+                    }
+                    if (swap_target_local < 0)
+                    {
+                        throw std::runtime_error("not enough non-target local qubits to localize targets");
+                    }
                     swap_target_global_list.push_back(tqn_i);
-                    int const swap_target_local = num_qubits_local - swap_target_global_list.size();
                     swap_target_local_list.push_back(swap_target_local);
                     target_qubit_num_physical_list[tqni] = swap_target_local;
+                    --swap_target_local;
                 }
             }
             int const num_swap_qubits = swap_target_global_list.size();
