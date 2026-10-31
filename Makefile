@@ -22,7 +22,7 @@ sharedlibrary: $(LIBQCS_SO)
 
 $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQCS_SO)
 	mkdir -p $(dir $@)
-	$(NVCC) $(NVCC_CFLAGS) src/qcs_main.cpp src/qcs_args.c -lqcs $(NVCC_LDFLAGS) -o $@
+	$(NVCC) src/qcs_main.cpp src/qcs_args.c -L./lib -lqcs -o $@
 
 $(LIBQCS_SO): src/qcs.cu include/qcs.h
 	mkdir -p $(dir $@)
