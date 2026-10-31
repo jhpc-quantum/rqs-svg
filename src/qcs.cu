@@ -23,6 +23,7 @@
 #include <tuple>
 #include <type_traits>
 #include <array>
+#include <thread>
 
 #include <mpi.h>
 #include <cuda_runtime.h>
@@ -54,6 +55,21 @@ namespace qcs
     typedef cuda::std::complex<qcs::float_t> complex_t;
     constexpr int max_measure_qubits = 8;
     constexpr int measure_group_size = max_measure_qubits;
+
+    constexpr unsigned int stream_sync_flags = cudaDeviceScheduleBlockingSync;
+    static_assert(stream_sync_flags == cudaDeviceScheduleSpin ||
+                  stream_sync_flags == cudaDeviceScheduleYield ||
+                  stream_sync_flags == cudaDeviceScheduleBlockingSync,
+                  "Unsupported CUDA stream synchronization setting");
+
+    enum class event_sync_mode
+    {
+        default_sync,
+        blocking_sync,
+        busy_loop,
+    };
+    constexpr event_sync_mode event_sync = event_sync_mode::blocking_sync;
+    constexpr bool event_busy_loop_yield = true;
 
     template <int N>
     using MeasureNorm = cuda::std::array<qcs::float_t, (1 << N)>;
@@ -1135,6 +1151,7 @@ namespace qcs
 
             gpu_id = my_node_local_rank;
             ATLC_CHECK_CUDA(cudaSetDevice, gpu_id);
+            ATLC_CHECK_CUDA(cudaSetDeviceFlags, stream_sync_flags);
 
             size_t total_memory_bytes = 0;
             size_t free_memory_bytes = 0;
@@ -2285,7 +2302,10 @@ int main() {
         {
             int const event_num = event_list.size();
             cudaEvent_t event;
-            ATLC_CHECK_CUDA(cudaEventCreateWithFlags, &event, cudaEventDefault);
+            constexpr unsigned int event_flags = event_sync == event_sync_mode::blocking_sync
+                                                     ? cudaEventBlockingSync
+                                                     : cudaEventDefault;
+            ATLC_CHECK_CUDA(cudaEventCreateWithFlags, &event, event_flags);
             this->event_list.push_back(event);
             return event_num;
         }
@@ -2296,32 +2316,36 @@ int main() {
             ATLC_CHECK_CUDA(cudaEventRecordWithFlags, event, stream, cudaEventDefault);
         }
 
+        void event_wait(cudaEvent_t const event)
+        {
+            while (true)
+            {
+                cudaError_t const result = cudaEventQuery(event);
+                if (result == cudaSuccess)
+                    return;
+                if (result != cudaErrorNotReady)
+                    throw std::runtime_error(cudaGetErrorString(result));
+
+                if constexpr (event_sync == event_sync_mode::busy_loop)
+                {
+                    if constexpr (event_busy_loop_yield)
+                        std::this_thread::yield();
+                }
+                else
+                {
+                    ATLC_CHECK_CUDA(cudaEventSynchronize, event);
+                    return;
+                }
+            }
+        }
+
         double event_get_elapsed_time(int const start_event_num, int const stop_event_num)
         {
             cudaEvent_t const start = event_list[start_event_num];
             cudaEvent_t const stop = event_list[stop_event_num];
 
-            cudaError_t q;
-
-            q = cudaEventQuery(start);
-            if (q == cudaErrorNotReady)
-            {
-                ATLC_CHECK_CUDA(cudaEventSynchronize, start);
-            }
-            else if (q != cudaSuccess)
-            {
-                throw std::runtime_error(cudaGetErrorString(q));
-            }
-
-            q = cudaEventQuery(stop);
-            if (q == cudaErrorNotReady)
-            {
-                ATLC_CHECK_CUDA(cudaEventSynchronize, stop);
-            }
-            else if (q != cudaSuccess)
-            {
-                throw std::runtime_error(cudaGetErrorString(q));
-            }
+            event_wait(start);
+            event_wait(stop);
 
             float elapsed_ms = 0.0f;
             ATLC_CHECK_CUDA(cudaEventElapsedTime, &elapsed_ms, start, stop);

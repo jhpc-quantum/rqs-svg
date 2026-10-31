@@ -32,6 +32,24 @@ To build RQS-SVG as a shared library at `lib/libqcs.so`:
 make sharedlibrary
 ```
 
+### CUDA synchronization settings
+
+The compile-time settings near the top of `src/qcs.cu` select stream and event
+synchronization independently:
+
+- `stream_sync_flags` accepts `cudaDeviceScheduleSpin`,
+  `cudaDeviceScheduleYield`, or `cudaDeviceScheduleBlockingSync` (the default).
+  It controls the CUDA device scheduling policy used while synchronizing streams.
+- `event_sync` accepts `event_sync_mode::default_sync`, `blocking_sync` (the
+  default), or `busy_loop`. Blocking mode creates events with
+  `cudaEventBlockingSync`; busy-loop mode polls with `cudaEventQuery`.
+- `event_busy_loop_yield` controls whether the busy loop yields the host thread
+  between incomplete queries. Its default is `true` and it has no effect in
+  the other event modes.
+
+Edit these constants and run `make` to rebuild the simulator, or run
+`make sharedlibrary` to rebuild the shared library alone.
+
 If you will run programs that load or link against `lib/libqcs.so`, source the provided shell setup file from the repository root or from any other directory:
 
 ```sh
