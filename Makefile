@@ -18,6 +18,12 @@ endif
 endif
 QCS_BIN ?= bin/qcs
 LIBQCS_SO ?= lib/libqcs.so
+# Embed the absolute library directory in the executable's runtime search path.
+QCS_RPATH ?= 1
+QCS_LDFLAGS =
+ifeq ($(QCS_RPATH),1)
+QCS_LDFLAGS += -Wl,-rpath,$(abspath $(dir $(LIBQCS_SO)))
+endif
 
 .PHONY: target
 target: $(QCS_BIN)
@@ -27,7 +33,7 @@ sharedlibrary: $(LIBQCS_SO)
 
 $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQCS_SO)
 	mkdir -p $(dir $@)
-	$(CXX) src/qcs_main.cpp src/qcs_args.c -L./lib -lqcs -o $@
+	$(CXX) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
 $(LIBQCS_SO): src/qcs.cu include/qcs.h
 	mkdir -p $(dir $@)

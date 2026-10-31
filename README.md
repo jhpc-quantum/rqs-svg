@@ -26,6 +26,22 @@ Then, `make` will build `bin/qcs`.
 make
 ```
 
+By default, `bin/qcs` embeds the absolute directory containing `libqcs.so`
+in its runtime library search path using `-Wl,-rpath`. No `LD_LIBRARY_PATH`
+setting is needed to locate `libqcs.so`. Other dependencies, such as CUDA,
+NCCL, and MPI, must still be available to the runtime loader. Rebuild the
+executable if you move the repository.
+
+To disable the embedded search path, rebuild with:
+
+```sh
+make clean
+make QCS_RPATH=0
+```
+
+With this option, use `source ./env.bash` or configure the runtime library
+search path yourself. Rebuild the executable when changing `QCS_RPATH`.
+
 To build RQS-SVG as a shared library at `lib/libqcs.so`:
 
 ```sh
@@ -142,7 +158,8 @@ synchronization independently:
 Edit these constants and run `make` to rebuild the simulator, or run
 `make sharedlibrary` to rebuild the shared library alone.
 
-If you will run programs that load or link against `lib/libqcs.so`, source the provided shell setup file from the repository root or from any other directory:
+For programs without an embedded runtime search path that load or link against
+`lib/libqcs.so`, source the provided shell setup file:
 
 ```sh
 source ./env.bash
@@ -254,8 +271,6 @@ measurement.
 You can execute the built simulator via:
 
 ```sh
-source ./env.bash
-
 mpirun -np (NUM_GPUS) ./bin/qcs [--num-samples NUM_SAMPLES|-s NUM_SAMPLES] user_circuit.so
 
 # Save the final statevector to a binary file
