@@ -53,7 +53,7 @@ namespace qcs
 
     typedef double float_t;
     typedef cuda::std::complex<qcs::float_t> complex_t;
-    constexpr int max_measure_qubits = 8;
+    constexpr int max_measure_qubits = 4;
     constexpr int measure_group_size = max_measure_qubits;
     constexpr bool exchange_pipeline_copy_back = true;
 
