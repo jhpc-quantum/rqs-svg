@@ -32,6 +32,27 @@ To build RQS-SVG as a shared library at `lib/libqcs.so`:
 make sharedlibrary
 ```
 
+### Exchange copy-back pipeline
+
+`exchange_pipeline_copy_back` near the top of `src/qcs.cu` defaults to
+`true`. It splits the existing swap buffer into two receive slots and overlaps
+copy-back on a separate stream with subsequent NCCL transfers. If the buffer
+contains fewer than two complex elements, the exchange uses the original
+single-stream path. Set the constant to `false` and rebuild to use that path
+for every exchange; no pipeline streams or events are created in that build.
+
+To validate on a CUDA/NCCL multi-GPU system, build both settings with `make`,
+then run the same deterministic, unmeasured circuits with `mpirun -np 2` and,
+where available, `mpirun -np 4`, using `--output-statevector` to save their
+results. Compare the resulting state vectors and logical-to-physical mappings
+against the disabled build. Exercise circuits with no exchange, consecutive
+exchanges followed by gates, and exchanges spanning multiple local areas and
+peers. To exercise slot reuse and the one-element fallback, temporarily limit
+the swap-buffer allocation in a validation build to suitable sizes; include at
+least three chunks for the reuse case. Restore the allocation before normal
+use. Compare exchange timings under identical circuit, rank, and buffer-size
+conditions if measuring performance.
+
 ### CUDA synchronization settings
 
 The compile-time settings near the top of `src/qcs.cu` select stream and event
