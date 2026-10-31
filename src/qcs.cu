@@ -1077,8 +1077,10 @@ namespace qcs
     }
 
     static_assert(sizeof(qcs::complex_t) == 16, "NVSHMEM exchange requires 16-byte complex values");
-    constexpr uint64_t exchange_chunk_elements = (UINT64_C(256) << 10) / sizeof(qcs::complex_t);
-    constexpr int exchange_threads = 256;
+    constexpr int exchange_threads = 32;
+    constexpr int exchange_blocks_per_sm = 16;
+    constexpr uint64_t exchange_chunk_bytes = UINT64_C(512) << 10;
+    constexpr uint64_t exchange_chunk_elements = exchange_chunk_bytes / sizeof(qcs::complex_t);
 
     struct exchange_phase
     {
@@ -1295,7 +1297,8 @@ namespace qcs
                 MPI_Comm comm = MPI_COMM_WORLD;
                 nvshmemx_init_attr_t attr{};
                 attr.mpi_comm = &comm;
-                check_nvshmem(nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr), "nvshmemx_init_attr");
+                check_nvshmem(nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr),
+                    "nvshmemx_init_attr (check NVSHMEM_SYMMETRIC_SIZE and available GPU memory)");
                 if (nvshmem_n_pes() != num_procs || nvshmem_my_pe() != proc_num)
                     throw std::runtime_error("NVSHMEM PE mapping differs from MPI ranks");
             }
@@ -1499,28 +1502,47 @@ namespace qcs
                 int capacity = 0;
                 check_nvshmem(nvshmemx_collective_launch_query_gridsize((const void *)exchange_registered_put,
                     dim3(exchange_threads), args, 0, &capacity), "NVSHMEM launch capacity query");
-                // The NCCL buffer is capped by half the state size.  That cap
-                // is unrelated to the number of independent NVSHMEM slots and
-                // would reduce small state vectors to a single block.
-                uint64_t const state_bytes = num_states_local * sizeof(qcs::complex_t);
-                uint64_t const available_bytes = initial_free_memory_bytes > state_bytes
-                    ? initial_free_memory_bytes - state_bytes : 0;
-                uint64_t const memory_blocks = available_bytes / ((UINT64_C(256) << 10) + 2 * sizeof(uint64_t));
-                int local_blocks = std::min(properties.multiProcessorCount, capacity);
-                local_blocks = static_cast<int>(std::min<uint64_t>(local_blocks > 0 ? local_blocks : 0, memory_blocks));
-                ATLC_CHECK_MPI(MPI_Allreduce, &local_blocks, &exchange_grid_blocks, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-                if (exchange_grid_blocks < 1) throw std::runtime_error("NVSHMEM collective launch has no capacity on at least one PE");
+                int const requested_blocks = properties.multiProcessorCount * exchange_blocks_per_sm;
+                bool const supported = properties.multiProcessorCount > 0 &&
+                    exchange_threads <= properties.maxThreadsPerBlock &&
+                    exchange_threads <= properties.maxThreadsDim[0] &&
+                    requested_blocks <= properties.maxGridSize[0] && requested_blocks <= capacity;
+                if (!supported)
+                    fprintf(stderr, "[error] rank %d: NVSHMEM exchange requests %d blocks (%d SMs x %d), "
+                        "%d threads/block; supported collective blocks=%d, grid blocks=%d, "
+                        "threads/block=%d, thread dimension=%d\n", proc_num, requested_blocks,
+                        properties.multiProcessorCount, exchange_blocks_per_sm, exchange_threads,
+                        capacity, properties.maxGridSize[0], properties.maxThreadsPerBlock, properties.maxThreadsDim[0]);
+                // The same grid and allocation sizes are required on every PE.
+                int local_limits[] = {properties.multiProcessorCount, -properties.multiProcessorCount, supported ? 1 : 0};
+                int global_limits[3]{};
+                ATLC_CHECK_MPI(MPI_Allreduce, local_limits, global_limits, 3, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                if (global_limits[0] != -global_limits[1])
+                    throw std::runtime_error("NVSHMEM exchange requires identical SM counts on all PEs; observed range " +
+                        std::to_string(global_limits[0]) + " to " + std::to_string(-global_limits[1]));
+                if (!global_limits[2])
+                    throw std::runtime_error("NVSHMEM exchange requested grid is unsupported on at least one PE; see rank diagnostics");
+                exchange_grid_blocks = requested_blocks;
                 swap_buffer_total_length = uint64_t(exchange_grid_blocks) * exchange_chunk_elements;
                 swap_buffer = static_cast<qcs::complex_t *>(nvshmem_malloc(swap_buffer_total_length * sizeof(qcs::complex_t)));
+                if (!swap_buffer)
+                    throw std::runtime_error("NVSHMEM staging allocation failed: requested " +
+                        std::to_string(uint64_t(exchange_grid_blocks) * exchange_chunk_bytes) +
+                        " bytes; increase NVSHMEM_SYMMETRIC_SIZE and ensure sufficient GPU memory");
                 exchange_signals = static_cast<uint64_t *>(nvshmem_malloc(2 * exchange_grid_blocks * sizeof(uint64_t)));
-                if (!swap_buffer || !exchange_signals) throw std::runtime_error("NVSHMEM symmetric allocation failed; increase NVSHMEM_SYMMETRIC_SIZE");
+                if (!exchange_signals)
+                    throw std::runtime_error("NVSHMEM signal allocation failed: requested " +
+                        std::to_string(uint64_t(2) * exchange_grid_blocks * sizeof(uint64_t)) +
+                        " bytes in addition to staging; increase NVSHMEM_SYMMETRIC_SIZE and ensure sufficient GPU memory");
                 ATLC_CHECK_CUDA(cudaMemsetAsync, exchange_signals, 0, 2 * exchange_grid_blocks * sizeof(uint64_t), stream);
                 // No peer may publish a signal until every PE has initialized
                 // its local counters, including after a later reallocation.
                 nvshmemx_barrier_all_on_stream(stream);
                 exchange_generation = 0;
-                if (proc_num == 0) fprintf(stderr, "[info] NVSHMEM exchange: %d blocks, 256 KiB per block, %zu bytes staging\n",
-                    exchange_grid_blocks, size_t(swap_buffer_total_length * sizeof(qcs::complex_t)));
+                if (proc_num == 0) fprintf(stderr, "[info] NVSHMEM exchange: %d SMs, %d blocks, %d threads/block, "
+                    "%" PRIu64 " bytes/block, %" PRIu64 " bytes symmetric staging\n",
+                    properties.multiProcessorCount, exchange_grid_blocks, exchange_threads,
+                    exchange_chunk_bytes, uint64_t(exchange_grid_blocks) * exchange_chunk_bytes);
             }
             else
 #endif

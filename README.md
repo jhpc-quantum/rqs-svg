@@ -66,15 +66,19 @@ rank and PE numbering equal to MPI rank numbering. Unified memory is not
 supported by this path. The state vector is registered once; staging and
 signals are symmetric allocations reused until cleanup.
 
-Each 256-thread block has a 256 KiB staging slot and independent ready and
-consumed signals. The common grid size is the minimum across ranks of the SM
-count, cooperative launch capacity, and estimated staging memory capacity;
-the estimate uses free device memory before state allocation, less the state
-size. It does not measure free space in the NVSHMEM symmetric heap. Rank 0
-prints the resulting block count and staging bytes. Set the symmetric
-heap large enough for `blocks * 256 KiB + 2 * blocks * 8 bytes` plus NVSHMEM
-overhead. One capacity query and one MPI all-reduce establish this layout at
-allocation time. Each exchange uses one collective kernel launch per nonzero
+Each block has 32 threads, a 512 KiB staging slot (32,768 complex values),
+and independent ready and consumed signals. The grid contains exactly 16
+blocks per SM. All PEs must have the same SM count and support the requested
+grid under both CUDA hardware and NVSHMEM collective-launch limits; otherwise
+initialization fails with a diagnostic. Rank 0 prints the SM count, grid,
+threads, chunk size, and staging allocation. Set `NVSHMEM_SYMMETRIC_SIZE` on
+every rank to at least `SM count * 16 * (512 KiB + 16 bytes)` plus NVSHMEM
+runtime and allocation overhead. For example, a GPU with 80 SMs needs 640 MiB
+of staging and 20 KiB of signals, plus overhead. Ensure the GPU has enough
+memory for the symmetric heap, state vector, and other allocations. NVSHMEM
+may reserve the heap during initialization; free GPU memory after initialization
+does not indicate remaining space within it. One capacity query and one MPI
+all-reduce establish this layout at allocation time. Each exchange uses one collective kernel launch per nonzero
 XOR peer phase (`2^k - 1` launches for `k` exchanged global qubits), no MPI
 collectives, and one stream-ordered NVSHMEM all-PE barrier per phase. Each
 kernel distributes all regions and chunks for its peer across blocks and
@@ -92,9 +96,9 @@ settings and an NVSHMEM build with the selector `true`. Run identical
 deterministic circuits at two and four ranks (and eight if available), saving
 and comparing state vectors and qubit mappings. Include single and multiple
 qubit exchanges, multiple peers, non-contiguous regions, repeated exchanges,
-and subsequent gates. Temporarily reduce `exchange_chunk_elements` in a
-validation build to exercise multiple rounds and partial chunks; restore it
-for performance measurements. Delay one rank in a harness to exercise uneven
+and subsequent gates. Exercise multiple rounds and partial chunks with suitable
+state sizes, or temporarily reduce `exchange_chunk_bytes` in a validation
+build and restore it afterwards. Delay one rank in a harness to exercise uneven
 progress. Measure exchange latency and bandwidth under identical workloads;
 these tests require a multi-GPU MPI/NVSHMEM installation.
 
