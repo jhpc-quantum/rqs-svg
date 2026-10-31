@@ -1,6 +1,7 @@
 -include config.mk
 LDLIBS ?= -lcurand -lnccl -ldl
 NVCC ?= nvcc --forward-unknown-to-host-compiler
+CXX ?= g++
 INCLUDE ?= -I./include
 NVCC_CFLAGS = $(CFLAGS_VENDOR) -Wformat=2 $(INCLUDE) -O3 -rdynamic -std=c++17 -Wno-deprecated-gpu-targets $(GENCODE_FLAGS)
 NVCC_LDFLAGS = $(LDFLAGS_VENDOR) -L./lib $(LDLIBS) --cudart=shared
@@ -22,7 +23,7 @@ sharedlibrary: $(LIBQCS_SO)
 
 $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQCS_SO)
 	mkdir -p $(dir $@)
-	$(NVCC) src/qcs_main.cpp src/qcs_args.c -L./lib -lqcs -o $@
+	$(CXX) src/qcs_main.cpp src/qcs_args.c -L./lib -lqcs -o $@
 
 $(LIBQCS_SO): src/qcs.cu include/qcs.h
 	mkdir -p $(dir $@)
