@@ -75,6 +75,14 @@ int main(int argc, char **argv)
         throw std::runtime_error("user circuit shared object path is required");
     }
 
+    qcs_set_exception_callback([](char const *message, size_t length)
+    {
+        fprintf(stderr, "[qcs pid=%ld] ", (long)getpid());
+        fwrite(message, 1, length, stderr);
+        fputc('\n', stderr);
+        fflush(stderr);
+    });
+
     qcs_simulator *sim_ptr = nullptr;
     if (!qcs_simulator_create(&sim_ptr))
     {
