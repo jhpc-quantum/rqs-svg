@@ -34,6 +34,10 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <nccl.h>
+#ifdef QCS_ENABLE_NVSHMEM
+#include <nvshmem.h>
+#include <nvshmemx.h>
+#endif
 
 #include <atlc/format.hpp>
 #include <atlc/log2_int.hpp>
@@ -55,6 +59,7 @@ namespace qcs
     typedef cuda::std::complex<qcs::float_t> complex_t;
     constexpr int max_measure_qubits = 4;
     constexpr int measure_group_size = max_measure_qubits;
+    // Applies only to the NCCL implementation.
     constexpr bool exchange_pipeline_copy_back = true;
 
     constexpr unsigned int stream_sync_flags = cudaDeviceScheduleBlockingSync;
@@ -1032,6 +1037,35 @@ namespace qcs
         laod_statevector,
     };
 
+#ifdef QCS_ENABLE_NVSHMEM
+    static void check_nvshmem(int result, const char *operation)
+    {
+        if (result != 0) throw std::runtime_error(std::string(operation) + " failed: " + std::to_string(result));
+    }
+
+    // One resident block owns the staging slot and both signals.
+    __global__ void exchange_registered_put(qcs::complex_t *state, qcs::complex_t *staging,
+                                             uint64_t *signals, uint64_t offset,
+                                             uint64_t length, uint64_t generation, int peer)
+    {
+        nvshmemx_putmem_signal_block(staging, state + offset, length * sizeof(qcs::complex_t),
+                                     signals, generation, NVSHMEM_SIGNAL_SET, peer);
+        __syncthreads();
+        if (threadIdx.x == 0) nvshmem_signal_wait_until(signals, NVSHMEM_CMP_GE, generation);
+        __syncthreads();
+        for (uint64_t i = threadIdx.x; i < length; i += blockDim.x) state[offset + i] = staging[i];
+        __syncthreads();
+        if (threadIdx.x == 0)
+        {
+            nvshmemx_signal_op(signals + 1, generation, NVSHMEM_SIGNAL_SET, peer);
+            nvshmem_quiet();
+            nvshmem_signal_wait_until(signals + 1, NVSHMEM_CMP_GE, generation);
+        }
+        __syncthreads();
+        __threadfence_system();
+    }
+#endif
+
     struct simulator_core
     {
 
@@ -1100,6 +1134,10 @@ namespace qcs
         int log_swap_buffer_total_length;
         uint64_t swap_buffer_total_length;
         qcs::complex_t *swap_buffer;
+#ifdef QCS_ENABLE_NVSHMEM
+        uint64_t *exchange_signals = nullptr;
+        uint64_t exchange_generation = 0;
+#endif
         void *measure_norm_device = NULL;
         size_t measure_norm_device_size = 0;
 
@@ -1182,11 +1220,22 @@ namespace qcs
             nccl_rank = proc_num;
             ATLC_CHECK_NCCL(ncclCommInitRank, &nccl_comm, num_procs, nccl_id, nccl_rank);
 
+#ifdef QCS_ENABLE_NVSHMEM
+            {
+                MPI_Comm comm = MPI_COMM_WORLD;
+                nvshmemx_init_attr_t attr{};
+                attr.mpi_comm = &comm;
+                check_nvshmem(nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr), "nvshmemx_init_attr");
+                if (nvshmem_n_pes() != num_procs || nvshmem_my_pe() != proc_num)
+                    throw std::runtime_error("NVSHMEM PE mapping differs from MPI ranks");
+            }
+#endif
             log_num_procs = atlc::log2_int(num_procs);
 
             log_block_size_max = 9;
 
             ATLC_CHECK_CUDA(cudaStreamCreate, &stream);
+#ifndef QCS_ENABLE_NVSHMEM
             if constexpr (exchange_pipeline_copy_back)
             {
                 ATLC_CHECK_CUDA(cudaStreamCreateWithFlags, &exchange_copy_stream, cudaStreamNonBlocking);
@@ -1196,6 +1245,7 @@ namespace qcs
                     ATLC_CHECK_CUDA(cudaEventCreateWithFlags, &exchange_copy_done[slot], cudaEventDisableTiming);
                 }
             }
+#endif
 
             block_size_max = 1 << log_block_size_max;
 
@@ -1313,6 +1363,13 @@ namespace qcs
 
             num_states_local = UINT64_C(1) << num_qubits_local;
 
+#ifdef QCS_ENABLE_NVSHMEM
+            {
+                if (use_unified_memory) throw std::runtime_error("NVSHMEM exchange does not support unified memory");
+                ATLC_CHECK_CUDA(cudaMalloc, &state_data_device, num_states_local * sizeof(*state_data_device));
+                check_nvshmem(nvshmemx_buffer_register(state_data_device, num_states_local * sizeof(*state_data_device)), "nvshmemx_buffer_register");
+            }
+#else
             if (use_unified_memory)
             {
                 ATLC_CHECK_CUDA(cudaMallocManaged, &state_data_device, num_states_local * sizeof(*state_data_device));
@@ -1321,6 +1378,7 @@ namespace qcs
             {
                 ATLC_CHECK_CUDA(cudaMallocAsync, &state_data_device, num_states_local * sizeof(*state_data_device), stream);
             }
+#endif
             initialize_zero();
 
             qcs_kernel_common_host.num_qubits = num_qubits;
@@ -1355,7 +1413,22 @@ namespace qcs
                     initial_free_memory_bytes);
             }
             swap_buffer_total_length = UINT64_C(1) << log_swap_buffer_total_length;
-            ATLC_CHECK_CUDA(cudaMallocAsync, &swap_buffer, swap_buffer_total_length * sizeof(qcs::complex_t), stream);
+#ifdef QCS_ENABLE_NVSHMEM
+            {
+                // Bound the symmetric heap footprint and agree on the smallest rank's capacity.
+                swap_buffer_total_length = std::min(swap_buffer_total_length, UINT64_C(262144));
+                uint64_t common_length = 0;
+                ATLC_CHECK_MPI(MPI_Allreduce, &swap_buffer_total_length, &common_length, 1, MPI_UINT64_T, MPI_MIN, MPI_COMM_WORLD);
+                swap_buffer_total_length = common_length;
+                swap_buffer = static_cast<qcs::complex_t *>(nvshmem_malloc(common_length * sizeof(qcs::complex_t)));
+                exchange_signals = static_cast<uint64_t *>(nvshmem_malloc(2 * sizeof(uint64_t)));
+                if (!swap_buffer || !exchange_signals) throw std::runtime_error("NVSHMEM symmetric allocation failed");
+                ATLC_CHECK_CUDA(cudaMemsetAsync, exchange_signals, 0, 2 * sizeof(uint64_t), stream);
+                exchange_generation = 0;
+            }
+#else
+                ATLC_CHECK_CUDA(cudaMallocAsync, &swap_buffer, swap_buffer_total_length * sizeof(qcs::complex_t), stream);
+#endif
 
             ATLC_CHECK_CUDA(cudaMallocAsync, &cub_temp_buffer_device, 1, stream);
             cub_temp_buffer_device_size = 1;
@@ -1368,6 +1441,23 @@ namespace qcs
                 ATLC_CHECK_CUDA(cudaFreeAsync, cub_temp_buffer_device, stream);
                 cub_temp_buffer_device = NULL;
             }
+#ifdef QCS_ENABLE_NVSHMEM
+            {
+                if (state_data_device || swap_buffer || exchange_signals)
+                {
+                    ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                    ATLC_CHECK_MPI(MPI_Barrier, MPI_COMM_WORLD);
+                    if (exchange_signals) { nvshmem_free(exchange_signals); exchange_signals = nullptr; }
+                    if (swap_buffer) { nvshmem_free(swap_buffer); swap_buffer = nullptr; }
+                    if (state_data_device)
+                    {
+                        check_nvshmem(nvshmemx_buffer_unregister(state_data_device), "nvshmemx_buffer_unregister");
+                        ATLC_CHECK_CUDA(cudaFree, state_data_device);
+                        state_data_device = nullptr;
+                    }
+                }
+            }
+#endif
             if (state_data_device)
             {
                 ATLC_CHECK_CUDA(cudaFreeAsync, state_data_device, stream);
@@ -1612,6 +1702,47 @@ namespace qcs
             }
         } /* determine_qubit_exchange_mapping */
 
+#ifdef QCS_ENABLE_NVSHMEM
+        void exchange_qubits_nvshmem()
+        {
+            int const count = swap_target_global_list.size();
+            int const low = *std::min_element(swap_target_local_list.begin(), swap_target_local_list.end());
+            uint64_t const area_length = UINT64_C(1) << low;
+            uint64_t const areas = UINT64_C(1) << (num_qubits_local - low);
+            uint64_t mask = 0;
+            for (int i = 0; i < count; ++i) mask |= UINT64_C(1) << (swap_target_global_list[i] - num_qubits_local);
+            uint64_t const chunk = std::min(area_length, swap_buffer_total_length);
+            // Every PE visits the same XOR masks, including disjoint peer groups.
+            for (uint64_t delta = 1; delta <= mask; ++delta)
+            {
+                if (delta & ~mask) continue;
+                int peer = proc_num ^ delta;
+                for (uint64_t area = 0; area < areas; ++area)
+                {
+                    uint64_t peer_bits = proc_num & ~mask;
+                    for (int i = 0; i < count; ++i)
+                        peer_bits |= ((area >> (swap_target_local_list[i] - low)) & 1)
+                                     << (swap_target_global_list[i] - num_qubits_local);
+                    if (peer_bits != static_cast<uint64_t>(peer)) continue;
+                    for (uint64_t position = 0; position < area_length; position += chunk)
+                    {
+                        uint64_t offset = area * area_length + position;
+                        uint64_t length = std::min(chunk, area_length - position);
+                        if (exchange_generation == UINT64_MAX) throw std::runtime_error("NVSHMEM signal generation exhausted");
+                        uint64_t generation = ++exchange_generation;
+                        void *args[] = {&state_data_device, &swap_buffer, &exchange_signals, &offset, &length, &generation, &peer};
+                        int capacity = 0;
+                        check_nvshmem(nvshmemx_collective_launch_query_gridsize((const void *)exchange_registered_put, dim3(256), args, 0, &capacity), "NVSHMEM launch capacity query");
+                        int common_capacity = 0;
+                        ATLC_CHECK_MPI(MPI_Allreduce, &capacity, &common_capacity, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                        if (common_capacity < 1) throw std::runtime_error("NVSHMEM collective launch has no capacity on at least one PE");
+                        check_nvshmem(nvshmemx_collective_launch((const void *)exchange_registered_put, dim3(1), dim3(256), args, 0, stream), "NVSHMEM collective launch");
+                    }
+                }
+            }
+        }
+#endif
+
         void exchange_qubits()
         {
             int const num_swap_qubits = swap_target_global_list.size();
@@ -1620,6 +1751,12 @@ namespace qcs
                 return;
             }
 
+#ifdef QCS_ENABLE_NVSHMEM
+            {
+                exchange_qubits_nvshmem();
+                return;
+            }
+#endif
             // b_min
             int const swap_target_local_min = *std::min_element(swap_target_local_list.data(), swap_target_local_list.data() + num_swap_qubits);
 
@@ -1731,6 +1868,7 @@ namespace qcs
                     buffer_pos += chunk_length;
                 }
             }
+#ifndef QCS_ENABLE_NVSHMEM
             if constexpr (exchange_pipeline_copy_back)
             {
                 if (last_slot >= 0)
@@ -1739,6 +1877,7 @@ namespace qcs
                     ATLC_CHECK_CUDA(cudaStreamWaitEvent, stream, exchange_copy_done[last_slot], 0);
                 }
             }
+#endif
         } /* exchange_qubits */
 
         void update_qubit_permutation_mapping()
@@ -2356,6 +2495,7 @@ int main() {
             {
                 ATLC_CHECK_CUDA(cudaEventDestroy, event);
             }
+#ifndef QCS_ENABLE_NVSHMEM
             if constexpr (exchange_pipeline_copy_back)
             {
                 for (int slot = 0; slot < 2; slot++)
@@ -2365,7 +2505,11 @@ int main() {
                 }
                 ATLC_CHECK_CUDA(cudaStreamDestroy, exchange_copy_stream);
             }
+#endif
             ATLC_CHECK_CUDA(cudaStreamDestroy, stream);
+#ifdef QCS_ENABLE_NVSHMEM
+            nvshmem_finalize();
+#endif
             MPI_Finalize();
         };
 

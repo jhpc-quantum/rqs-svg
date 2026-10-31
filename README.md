@@ -32,6 +32,43 @@ To build RQS-SVG as a shared library at `lib/libqcs.so`:
 make sharedlibrary
 ```
 
+### Optional NVSHMEM exchange
+
+The `QCS_ENABLE_NVSHMEM` build definition selects the NVSHMEM exchange path.
+It is absent in the normal build and is defined automatically when `NVSHMEM=1`
+is passed to `make`. Build both the shared library and executable with
+`make clean && make NVSHMEM=1 NVSHMEM_HOME=/path/to/nvshmem` to enable it.
+Use the same option with `make sharedlibrary` for a library-only build. The
+NVSHMEM installation must support MPI bootstrap and GPU-initiated PUT and
+signals for the selected CUDA devices and transport. Configure MPI compiler
+and link flags in `config.mk` as for the normal build; expose NVSHMEM's host
+library at runtime (for example through `LD_LIBRARY_PATH`). Set
+`NVSHMEM_SYMMETRIC_SIZE` large enough for a staging allocation of up to 4 MiB,
+the signals, and NVSHMEM runtime overhead on each GPU. All MPI ranks must
+participate in the same simulator operations in the same order, with one GPU
+per rank and NVSHMEM PE numbering equal to MPI rank numbering. Unified memory
+is unsupported in this mode. The state vector uses registered `cudaMalloc`
+storage; staging and signals use the symmetric heap. The staging capacity is
+the smallest available capacity across ranks, capped at 4 MiB.
+
+The registered PUT path uses one staging slot. It transfers each chunk before
+waiting for its peer's ready signal, copies the received data into the state
+vector, then exchanges consumed signals before either peer reuses the slot.
+The monotonically increasing signals persist across exchanges. Kernels use
+NVSHMEM collective launch and execute on the simulator stream. The
+`exchange_pipeline_copy_back` setting affects only the NCCL path.
+
+For validation, build a baseline with the selector `false` for each value of
+`exchange_pipeline_copy_back`, and an NVSHMEM build with the selector `true`.
+Run the same deterministic circuits using the commands below at two and four
+ranks, saving each output under a different filename. Compare the binary state
+vectors and reported qubit mappings. Include no-exchange, self-peer,
+single- and multiple-qubit exchanges, repeated exchanges followed by gates,
+and multiple peers. Temporarily set the 262144-element staging cap to 3 in a
+validation build to force multiple chunks and a partial final chunk; restore it
+and the selector before normal use. Delay one rank in a test harness to exercise
+uneven progress. These checks require a multi-GPU MPI/NVSHMEM installation.
+
 ### Exchange copy-back pipeline
 
 `exchange_pipeline_copy_back` near the top of `src/qcs.cu` defaults to
