@@ -5,12 +5,16 @@ CXX ?= g++
 INCLUDE ?= -I./include
 NVCC_CFLAGS = $(CFLAGS_VENDOR) -Wformat=2 $(INCLUDE) -O3 -rdynamic -std=c++17 -Wno-deprecated-gpu-targets $(GENCODE_FLAGS)
 NVCC_LDFLAGS = $(LDFLAGS_VENDOR) -L./lib $(LDLIBS) --cudart=shared
-# Set NVSHMEM=1 to compile and enable the NVSHMEM exchange path.
+# Set NVSHMEM=1 to compile NVSHMEM support; select the path in src/qcs.cu.
 # NVSHMEM_HOME must point to an installation built with MPI support.
 NVSHMEM ?= 0
 ifeq ($(NVSHMEM),1)
 NVCC_CFLAGS += -DQCS_ENABLE_NVSHMEM -rdc=true
 NVCC_LDFLAGS += -lnvshmem_host -lnvshmem_device
+ifneq ($(strip $(NVSHMEM_HOME)),)
+NVCC_CFLAGS += -I$(NVSHMEM_HOME)/include
+NVCC_LDFLAGS += -L$(NVSHMEM_HOME)/lib
+endif
 endif
 QCS_BIN ?= bin/qcs
 LIBQCS_SO ?= lib/libqcs.so

@@ -50,40 +50,53 @@ qubit. Use deterministic measurements so the two runs select the same branch.
 
 ### Optional NVSHMEM exchange
 
-The `QCS_ENABLE_NVSHMEM` build definition selects the NVSHMEM exchange path.
-It is absent in the normal build and is defined automatically when `NVSHMEM=1`
-is passed to `make`. Build both the shared library and executable with
-`make clean && make NVSHMEM=1 NVSHMEM_HOME=/path/to/nvshmem` to enable it.
-Use the same option with `make sharedlibrary` for a library-only build. The
-NVSHMEM installation must support MPI bootstrap and GPU-initiated PUT and
-signals for the selected CUDA devices and transport. Configure MPI compiler
-and link flags in `config.mk` as for the normal build; expose NVSHMEM's host
-library at runtime (for example through `LD_LIBRARY_PATH`). Set
-`NVSHMEM_SYMMETRIC_SIZE` large enough for a staging allocation of up to 4 MiB,
-the signals, and NVSHMEM runtime overhead on each GPU. All MPI ranks must
-participate in the same simulator operations in the same order, with one GPU
-per rank and NVSHMEM PE numbering equal to MPI rank numbering. Unified memory
-is unsupported in this mode. The state vector uses registered `cudaMalloc`
-storage; staging and signals use the symmetric heap. The staging capacity is
-the smallest available capacity across ranks, capped at 4 MiB.
+NVSHMEM is disabled by default. Set `exchange_nvshmem_registered_put` near
+the top of `src/qcs.cu` to `true`, then build with
+`make clean && make NVSHMEM=1 NVSHMEM_HOME=/path/to/nvshmem`. The build flag
+provides the dependency and defines `QCS_ENABLE_NVSHMEM`; it does not select
+the algorithm. With the selector `false`, even an NVSHMEM-enabled build uses
+the normal NCCL exchange and its `exchange_pipeline_copy_back` setting.
 
-The registered PUT path uses one staging slot. It transfers each chunk before
-waiting for its peer's ready signal, copies the received data into the state
-vector, then exchanges consumed signals before either peer reuses the slot.
-The monotonically increasing signals persist across exchanges. Kernels use
-NVSHMEM collective launch and execute on the simulator stream. The
-`exchange_pipeline_copy_back` setting affects only the NCCL path.
+The installation must support MPI bootstrap, registered GPU buffers, device PUT
+and signals, and collective launches. Configure MPI compiler and link flags in
+`config.mk`, expose the NVSHMEM host library at runtime, and provide sufficient
+`NVSHMEM_SYMMETRIC_SIZE` for staging, signals, and runtime overhead. All ranks
+must execute the same simulator operations in the same order, with one GPU per
+rank and PE numbering equal to MPI rank numbering. Unified memory is not
+supported by this path. The state vector is registered once; staging and
+signals are symmetric allocations reused until cleanup.
 
-For validation, build a baseline with the selector `false` for each value of
-`exchange_pipeline_copy_back`, and an NVSHMEM build with the selector `true`.
-Run the same deterministic circuits using the commands below at two and four
-ranks, saving each output under a different filename. Compare the binary state
-vectors and reported qubit mappings. Include no-exchange, self-peer,
-single- and multiple-qubit exchanges, repeated exchanges followed by gates,
-and multiple peers. Temporarily set the 262144-element staging cap to 3 in a
-validation build to force multiple chunks and a partial final chunk; restore it
-and the selector before normal use. Delay one rank in a test harness to exercise
-uneven progress. These checks require a multi-GPU MPI/NVSHMEM installation.
+Each 256-thread block has a 256 KiB staging slot and independent ready and
+consumed signals. The common grid size is the minimum across ranks of the SM
+count, cooperative launch capacity, and estimated staging memory capacity;
+the estimate uses free device memory before state allocation, less the state
+size. It does not measure free space in the NVSHMEM symmetric heap. Rank 0
+prints the resulting block count and staging bytes. Set the symmetric
+heap large enough for `blocks * 256 KiB + 2 * blocks * 8 bytes` plus NVSHMEM
+overhead. One capacity query and one MPI all-reduce establish this layout at
+allocation time. Each exchange uses one collective kernel launch per nonzero
+XOR peer phase (`2^k - 1` launches for `k` exchanged global qubits), no MPI
+collectives, and one stream-ordered NVSHMEM all-PE barrier per phase. Each
+kernel distributes all regions and chunks for its peer across blocks and
+performs successive rounds on the GPU. The barrier prevents a new peer's
+signal from satisfying an earlier peer's wait; it can limit performance when
+many peers participate. The kernel follows the reference method 2 PUT, ready
+wait, copy, consumed notification, quiet and wait sequence. Generations
+increase across phases and exchanges, with overflow rejected. All work is
+ordered on the simulator stream before subsequent gates. An additional
+stream-ordered barrier after signal initialization prevents peers from
+signaling counters that have not yet been cleared.
+
+For validation, build NCCL baselines for both `exchange_pipeline_copy_back`
+settings and an NVSHMEM build with the selector `true`. Run identical
+deterministic circuits at two and four ranks (and eight if available), saving
+and comparing state vectors and qubit mappings. Include single and multiple
+qubit exchanges, multiple peers, non-contiguous regions, repeated exchanges,
+and subsequent gates. Temporarily reduce `exchange_chunk_elements` in a
+validation build to exercise multiple rounds and partial chunks; restore it
+for performance measurements. Delay one rank in a harness to exercise uneven
+progress. Measure exchange latency and bandwidth under identical workloads;
+these tests require a multi-GPU MPI/NVSHMEM installation.
 
 ### Exchange copy-back pipeline
 
