@@ -59,7 +59,8 @@ The compile-time settings near the top of `src/qcs.cu` select stream and event
 synchronization independently:
 
 - `stream_sync_flags` accepts `cudaDeviceScheduleSpin`,
-  `cudaDeviceScheduleYield`, or `cudaDeviceScheduleBlockingSync` (the default).
+  `cudaDeviceScheduleYield`, `cudaDeviceScheduleAuto`, or
+  `cudaDeviceScheduleBlockingSync` (the default).
   It controls the CUDA device scheduling policy used while synchronizing streams.
 - `event_sync` accepts `event_sync_mode::default_sync`, `blocking_sync` (the
   default), or `busy_loop`. Blocking mode creates events with

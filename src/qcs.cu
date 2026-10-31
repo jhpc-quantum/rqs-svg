@@ -60,6 +60,7 @@ namespace qcs
     constexpr unsigned int stream_sync_flags = cudaDeviceScheduleBlockingSync;
     static_assert(stream_sync_flags == cudaDeviceScheduleSpin ||
                   stream_sync_flags == cudaDeviceScheduleYield ||
+                  stream_sync_flags == cudaDeviceScheduleAuto ||
                   stream_sync_flags == cudaDeviceScheduleBlockingSync,
                   "Unsupported CUDA stream synchronization setting");
 
