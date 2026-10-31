@@ -59,6 +59,7 @@ namespace qcs
     typedef cuda::std::complex<qcs::float_t> complex_t;
     constexpr int max_measure_qubits = 4;
     constexpr int measure_group_size = max_measure_qubits;
+    constexpr bool use_global_memory_for_constants = false;
     // Applies only to the NCCL implementation.
     constexpr bool exchange_pipeline_copy_back = true;
 
@@ -116,8 +117,10 @@ namespace qcs
     };
 
     __constant__ qcs::complex_t zero_constant;
+    __device__ qcs::complex_t zero_global;
 
     __constant__ qcs::kernel_common_struct kernel_common_constant;
+    __device__ qcs::kernel_common_struct kernel_common_global;
 
     struct kernel_input_qnlist_struct
     {
@@ -179,11 +182,37 @@ namespace qcs
 
     constexpr int max_num_qubits_local = 34;
     constexpr uint64_t kernel_input_max_size = qcs::kernel_input_qnlist_struct::needed_size(qcs::max_num_qubits_local, 0, 0);
-    __constant__ unsigned char kernel_input_constant[qcs::kernel_input_max_size];
+    alignas(kernel_input_qnlist_struct) __constant__ unsigned char kernel_input_constant[qcs::kernel_input_max_size];
+    alignas(kernel_input_qnlist_struct) __device__ unsigned char kernel_input_global[qcs::kernel_input_max_size];
+
+    // The host resolves the corresponding symbol with the same selector below.
+    __device__ inline qcs::complex_t const *zero_data()
+    {
+        if constexpr (use_global_memory_for_constants)
+            return &zero_global;
+        else
+            return &zero_constant;
+    }
+
+    __device__ inline qcs::kernel_common_struct const &kernel_common_data()
+    {
+        if constexpr (use_global_memory_for_constants)
+            return kernel_common_global;
+        else
+            return kernel_common_constant;
+    }
+
+    __device__ inline qcs::kernel_input_qnlist_struct const *kernel_input_data()
+    {
+        if constexpr (use_global_memory_for_constants)
+            return reinterpret_cast<qcs::kernel_input_qnlist_struct const *>(kernel_input_global);
+        else
+            return reinterpret_cast<qcs::kernel_input_qnlist_struct const *>(kernel_input_constant);
+    }
 
     static __device__ void thread_num_to_state_index_q0(uint64_t thread_num, uint64_t &index_state)
     {
-        auto args = (qcs::kernel_input_qnlist_struct const *)(void *)qcs::kernel_input_constant;
+        auto args = kernel_input_data();
 
         index_state = 0;
 
@@ -243,7 +272,7 @@ namespace qcs
 
         thread_num_to_state_index_q0(thread_num, index_state[0]);
 
-        auto args = (qcs::kernel_input_qnlist_struct const *)(void *)qcs::kernel_input_constant;
+        auto args = kernel_input_data();
         int const *const target_qubit_num_list = args->get_target_qubit_num_list();
 
         // Add target bits in ascending basis-index order, with target 0 as LSB.
@@ -925,14 +954,14 @@ namespace qcs
             thread_num_to_state_index<num_target_qubits>(thread_num, index_state, is_measured_bits, measured_value_bits);
         }
 
-        qcs::complex_t *const state = qcs::kernel_common_constant.state_data_device;
+        qcs::complex_t *const state = kernel_common_data().state_data_device;
         qcs::complex_t const *const state_in = state;
         qcs::complex_t const *s_in[num_basis_indices];
         qcs::complex_t *s_out[num_basis_indices];
         #pragma unroll num_basis_indices
         for (int i = 0; i < num_basis_indices; ++i)
         {
-            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : &zero_constant;
+            s_in[i] = (((i ^ measured_value_bits) & is_measured_bits) == 0) ? &state_in[index_state[i]] : zero_data();
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
@@ -985,7 +1014,7 @@ namespace qcs
                     #pragma unroll
                     for (int bit = 0; bit < L; ++bit)
                         outcome |= uint64_t((basis >> bit) & 1) << local_outcome_bits[bit];
-                    result[outcome] = cuda::std::norm(qcs::kernel_common_constant.state_data_device[index_state[basis]]);
+                    result[outcome] = cuda::std::norm(kernel_common_data().state_data_device[index_state[basis]]);
                 }
                 return result;
             }
@@ -1249,11 +1278,18 @@ namespace qcs
 
             block_size_max = 1 << log_block_size_max;
 
-            ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_common_constant_addr, qcs::kernel_common_constant);
-
-            ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_input_constant_addr, qcs::kernel_input_constant);
-
-            ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&zero_constant_addr, qcs::zero_constant);
+            if constexpr (use_global_memory_for_constants)
+            {
+                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_common_constant_addr, qcs::kernel_common_global);
+                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_input_constant_addr, qcs::kernel_input_global);
+                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&zero_constant_addr, qcs::zero_global);
+            }
+            else
+            {
+                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_common_constant_addr, qcs::kernel_common_constant);
+                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_input_constant_addr, qcs::kernel_input_constant);
+                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&zero_constant_addr, qcs::zero_constant);
+            }
 
             qcs::complex_t const complex_zero = 0;
             ATLC_CHECK_CUDA(cudaMemcpyAsync, zero_constant_addr, &complex_zero, sizeof(qcs::complex_t), cudaMemcpyHostToDevice, stream);

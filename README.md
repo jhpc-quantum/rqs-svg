@@ -32,6 +32,22 @@ To build RQS-SVG as a shared library at `lib/libqcs.so`:
 make sharedlibrary
 ```
 
+### Storage for kernel constants
+
+`use_global_memory_for_constants` near the top of `src/qcs.cu` defaults to
+`false`, using CUDA constant memory. Set it to `true` and rebuild with
+`make` to store the same data in device global memory. `make sharedlibrary`
+rebuilds the library alone; restore `false` to return to constant memory.
+
+To compare both modes on a CUDA/MPI system, build each setting with
+`make clean && make target sharedlibrary`. For each build, compile and run the
+same deterministic circuits using `./compile_circuit.sh`, then
+`mpirun -np 1 ./bin/qcs --output-statevector MODE.bin circuit.so` (after
+`source ./env.bash`). Compare the resulting state vectors and qubit mappings.
+Include ordinary and controlled gates, and a circuit that prepares a known
+measurement outcome, measures a qubit, then applies a gate to that measured
+qubit. Use deterministic measurements so the two runs select the same branch.
+
 ### Optional NVSHMEM exchange
 
 The `QCS_ENABLE_NVSHMEM` build definition selects the NVSHMEM exchange path.
