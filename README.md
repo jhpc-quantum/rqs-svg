@@ -66,12 +66,14 @@ qubit. Use deterministic measurements so the two runs select the same branch.
 
 ### Optional NVSHMEM exchange
 
-NVSHMEM is disabled by default. Set `exchange_nvshmem_registered_put` near
-the top of `src/qcs.cu` to `true`, then build with
-`make clean && make NVSHMEM=1 NVSHMEM_HOME=/path/to/nvshmem`. The build flag
-provides the dependency and defines `QCS_ENABLE_NVSHMEM`; it does not select
-the algorithm. With the selector `false`, even an NVSHMEM-enabled build uses
-the normal NCCL exchange and its `exchange_pipeline_copy_back` setting.
+NVSHMEM is disabled by default. Build with
+`make clean && make NVSHMEM=1 NVSHMEM_HOME=/path/to/nvshmem` to enable it.
+This defines `QCS_ENABLE_NVSHMEM`, which automatically sets
+`exchange_nvshmem_registered_put` in `src/qcs.cu` to `true` and selects
+NVSHMEM registered-PUT exchange. When the macro is not defined, the constant
+is `false` and the simulator uses NCCL exchange with its
+`exchange_pipeline_copy_back` setting. Clean and rebuild when switching
+between NCCL and NVSHMEM builds.
 
 The installation must support MPI bootstrap, registered GPU buffers, device PUT
 and signals, and collective launches. Configure MPI compiler and link flags in
@@ -108,7 +110,7 @@ stream-ordered barrier after signal initialization prevents peers from
 signaling counters that have not yet been cleared.
 
 For validation, build NCCL baselines for both `exchange_pipeline_copy_back`
-settings and an NVSHMEM build with the selector `true`. Run identical
+settings with `NVSHMEM=0` and an NVSHMEM build with `NVSHMEM=1`. Run identical
 deterministic circuits at two and four ranks (and eight if available), saving
 and comparing state vectors and qubit mappings. Include single and multiple
 qubit exchanges, multiple peers, non-contiguous regions, repeated exchanges,
@@ -121,7 +123,8 @@ these tests require a multi-GPU MPI/NVSHMEM installation.
 ### Exchange copy-back pipeline
 
 `exchange_pipeline_copy_back` near the top of `src/qcs.cu` defaults to
-`true`. It splits the existing swap buffer into two receive slots and overlaps
+`true` and applies only to NCCL exchange (when `QCS_ENABLE_NVSHMEM` is not
+defined). It splits the existing swap buffer into two receive slots and overlaps
 copy-back on a separate stream with subsequent NCCL transfers. If the buffer
 contains fewer than two complex elements, the exchange uses the original
 single-stream path. Set the constant to `false` and rebuild to use that path

@@ -62,9 +62,10 @@ namespace qcs
     constexpr bool use_global_memory_for_constants = false;
     // Applies only to the NCCL implementation.
     constexpr bool exchange_pipeline_copy_back = true;
+#ifdef QCS_ENABLE_NVSHMEM
+    constexpr bool exchange_nvshmem_registered_put = true;
+#else
     constexpr bool exchange_nvshmem_registered_put = false;
-#ifndef QCS_ENABLE_NVSHMEM
-    static_assert(!exchange_nvshmem_registered_put, "Build with NVSHMEM=1 to select NVSHMEM exchange");
 #endif
 
     constexpr unsigned int stream_sync_flags = cudaDeviceScheduleBlockingSync;
