@@ -49,6 +49,7 @@
 #include <atlc/check_nccl.hpp>
 
 #include <qcs.h>
+#include "measurement_reduce.cuh"
 
 namespace qcs
 {
@@ -85,6 +86,9 @@ namespace qcs
 
     template <int N>
     using MeasureNorm = cuda::std::array<qcs::float_t, (1 << N)>;
+
+    static_assert(std::is_same<float_t, measurement_detail::real_type>::value);
+    static_assert(std::is_same<complex_t, measurement_detail::state_type>::value);
 
     __device__ __host__ complex_t multiply_i(complex_t input)
     {

@@ -35,9 +35,18 @@ $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQC
 	mkdir -p $(dir $@)
 	$(CXX) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
-$(LIBQCS_SO): src/qcs.cu include/qcs.h
+$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) -fPIC -shared src/qcs.cu -o $@ $(NVCC_LDFLAGS)
+
+MEASUREMENT_REDUCE_TEST ?= bin/measurement_reduce_test
+$(MEASUREMENT_REDUCE_TEST): tests/measurement_reduce_test.cu src/measurement_reduce.cuh
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) tests/measurement_reduce_test.cu -o $@ $(LDFLAGS_VENDOR) --cudart=shared
+
+.PHONY: test-measurement-reduce
+test-measurement-reduce: $(MEASUREMENT_REDUCE_TEST)
+	./$(MEASUREMENT_REDUCE_TEST)
 
 .PHONY: gengetopt
 gengetopt: src/qcs_args.ggo
@@ -45,4 +54,4 @@ gengetopt: src/qcs_args.ggo
 
 .PHONY: clean
 clean:
-	$(RM) $(QCS_BIN) $(LIBQCS_SO)
+	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST)
