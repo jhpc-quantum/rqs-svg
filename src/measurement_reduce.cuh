@@ -11,11 +11,13 @@
 #include <cuda/std/complex>
 #include <atlc/check_cuda.hpp>
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include "work_buffer.hpp"
 
 namespace qcs::measurement_detail
 {
@@ -350,6 +352,7 @@ class workspace
     cudaStream_t stream_;
     double* data_ = nullptr;
     uint64_t capacity_ = 0;
+    bool owns_data_ = true;
     std::array<launch_config, 4> configs_{};
 
     void require_owner(cudaStream_t stream) const
@@ -365,13 +368,25 @@ public:
     {
         ATLC_CHECK_CUDA(cudaGetDevice, &device_);
     }
+    workspace(cudaStream_t stream, qcs::buffer_arena& arena) : workspace(stream)
+    {
+        // Reserve the largest supported reduction before swap storage is cut
+        // out, so later measurements never allocate or compete with exchange.
+        configs_ = {resources<1>(device_), resources<2>(device_),
+                    resources<3>(device_), resources<4>(device_)};
+        for (unsigned n = 1; n <= configs_.size(); ++n)
+            capacity_ = std::max(capacity_, checked_product(UINT64_C(1) << n,
+                                                          uint64_t(configs_[n - 1].blocks) + 1));
+        data_ = static_cast<double*>(arena.take(allocation_bytes(capacity_, sizeof(double))));
+        owns_data_ = false;
+    }
     workspace(const workspace&) = delete;
     workspace& operator=(const workspace&) = delete;
     ~workspace() noexcept
     {
         // close() is the explicit, error-reporting teardown. Destruction queues
         // release on the owner stream without throwing or synchronizing.
-        if (!data_) return;
+        if (!data_ || !owns_data_) return;
         int previous;
         if (cudaGetDevice(&previous) != cudaSuccess) return;
         if (previous != device_ && cudaSetDevice(device_) != cudaSuccess) return;
@@ -381,6 +396,7 @@ public:
     void close()
     {
         if (!data_) return;
+        if (!owns_data_) { data_ = nullptr; capacity_ = 0; return; }
         int previous;
         ATLC_CHECK_CUDA(cudaGetDevice, &previous);
         if (previous != device_) ATLC_CHECK_CUDA(cudaSetDevice, device_);
@@ -403,6 +419,8 @@ public:
         uint64_t required = checked_product(UINT64_C(1) << N, uint64_t(config.blocks) + 1);
         if (required > capacity_)
         {
+            if (!owns_data_)
+                throw std::runtime_error("measurement reducer: external workspace capacity exceeded");
             double* next = nullptr;
             ATLC_CHECK_CUDA(cudaMallocAsync, &next, allocation_bytes(required, sizeof(double)), stream_);
             if (data_)

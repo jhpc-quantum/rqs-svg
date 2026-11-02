@@ -64,6 +64,26 @@ Include ordinary and controlled gates, and a circuit that prepares a known
 measurement outcome, measures a qubit, then applies a gate to that measured
 qubit. Use deterministic measurements so the two runs select the same branch.
 
+### Device work buffer
+
+After allocating and initializing the state vector, the simulator queries the
+remaining GPU memory and allocates `floor(free_bytes * 95 / 100)` bytes as one
+work buffer. Measurement partials, output bins and sampler scratch use a fixed
+slice sized for every supported group width (1 through 4). The NCCL swap buffer
+uses another slice, capped at half the local state vector and reduced to a
+fitting power of two when necessary. Slices are aligned to 256 bytes and never
+freed individually. Insufficient capacity raises an error before use.
+
+NVSHMEM requires symmetric addresses for staging and signals. The same work
+buffer owner therefore also holds a separate symmetric backing allocation and
+carves staging and signal slices from it. This allocation precedes the 95%
+CUDA memory query; its size remains determined by the exchange grid. The
+unallocated 5% of ordinary free memory remains available to runtime libraries.
+
+Run `make test-work-buffer` for host tests of budget arithmetic, alignment and
+capacity limits, and `make test-measurement-reduce` on CUDA hardware for shared
+buffer isolation and measurement correctness.
+
 ### Optional NVSHMEM exchange
 
 NVSHMEM is disabled by default. Build with

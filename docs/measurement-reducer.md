@@ -29,17 +29,25 @@ The launch policy remains S=256 threads and G=8*SM_count blocks in both stages.
 Stage one writes `partials[bin*G + block]`; stage two reads using that actual G.
 Dynamic shared bytes are `256 * 2^N * sizeof(double)` (32 KiB at N=4), plus
 compiled static scratch. Exact kernel limits, opt-in shared capacity, and nonzero
-occupancy are checked on first use. There is no fallback or measured tuning.
+occupancy are checked when reserving workspace (at simulator allocation time,
+or on first use for the standalone owning workspace). There is no fallback or measured tuning.
 
-Each simulator owns one device/stream-bound workspace. It grows on demand and
-reuses storage; all used elements are overwritten. `enqueue` launches both stages
+Each simulator owns one device/stream-bound measurement workspace borrowing a
+fixed slice of the shared work buffer. After state allocation, the work buffer
+reserves 95% of remaining CUDA memory. The measurement slice is sized once for
+the largest requirement across N=1..4, before the swap slice is carved out;
+measurements do not grow or allocate storage. All used elements are overwritten.
+The standalone reducer test also supports an owning workspace that grows on
+demand. `enqueue` launches both stages
 without synchronization and returns device bins valid until the next call or
 close. NCCL AllReduce sums the output bins in place on the same stream, followed
 by the device sampler and an eight-byte outcome/status copy. Only that final
 readback is followed by stream synchronization; weights and prefixes remain on
 the device throughout production sampling.
-The owning stream must outlive the workspace; explicit `close()` reports release
-errors. Descriptor shifts, allocation products, and indexing use checked 64-bit
+The owning stream and backing work buffer must outlive the measurement workspace.
+For a borrowed slice, `close()` only detaches it; the simulator frees the backing
+buffer after all uses. For a standalone owning workspace, `close()` reports
+release errors. Descriptor shifts, allocation products, and indexing use checked 64-bit
 operations. The reducer receives metadata by value and does not depend on the
 gate constant/global metadata storage selector.
 
@@ -209,7 +217,7 @@ synchronization. The result is eight bytes. Cumulative selection and Philox run
 on device. No measurement probability MPI reduction, CPU draw, CPU cumulative
 selection or sampling broadcast occurs on this path. Setup still broadcasts the
 common seed. The workspace reuses dead partial storage for the result and
-retains capacity after growth. The regression source copy deliberately adds
+retains its preallocated capacity. The regression source copy deliberately adds
 array downloads; it must not be used to claim production transfer behavior.
 This description comes from implementation inspection, not a runtime trace.
 
@@ -267,7 +275,7 @@ global controls, and a reverse mapping. Identical prepared amplitudes and prior
 controls are restored outside timing; an untimed barrier precedes each sample.
 An extra priming iteration and warmups precede retained samples. Report maximum
 rank duration per repetition, p10/median/p90, GPU/node topology, software versions,
-flags and both revisions. CSV workspace capacity reflects earlier growth.
+flags and both revisions. CSV workspace capacity reflects reserved measurement storage.
 Retain variability and regressions; removing host sampling does not establish
 a speedup for every workload.
 

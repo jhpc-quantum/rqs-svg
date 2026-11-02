@@ -32,6 +32,10 @@ else:
     source = replace_once(source, collective, collective + '\n            if (measurement_probe::observer) measurement_probe::observer(N, qubits.data(), local_norm.data(), global_norm.data());')
 custom = 'measurement_workspace->enqueue<N>' in source
 a.output.mkdir(parents=True, exist_ok=True)
+for name in ('work_buffer.hpp', 'work_buffer.cuh'):
+    header_path = a.source / 'src' / name
+    if header_path.exists():
+        (a.output / name).write_text(header_path.read_text())
 if custom:
     header = (a.source / 'src/measurement_reduce.cuh').read_text()
     start = '        first_stage<N><<<config.blocks, block_size, config.dynamic_shared, stream>>>(state, packed, data_);'

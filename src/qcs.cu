@@ -49,6 +49,7 @@
 
 #include <qcs.h>
 #include "measurement_reduce.cuh"
+#include "work_buffer.cuh"
 
 namespace qcs
 {
@@ -1116,6 +1117,7 @@ namespace qcs
         qcs::kernel_common_struct qcs_kernel_common_host;
         qcs::kernel_input_qnlist_struct *qcs_kernel_input_constant_addr;
         std::vector<char> qcs_kernel_input_host_buffer;
+        qcs::work_buffer scratch;
         int log_swap_buffer_total_length;
         uint64_t swap_buffer_total_length;
         qcs::complex_t *swap_buffer;
@@ -1372,34 +1374,6 @@ namespace qcs
             qcs_kernel_common_host.state_data_device = state_data_device;
             ATLC_CHECK_CUDA(cudaMemcpyAsync, qcs_kernel_common_constant_addr, &qcs_kernel_common_host, sizeof(qcs::kernel_common_struct), cudaMemcpyHostToDevice, stream);
 
-            uint64_t const allocatable_states = (uint64_t)initial_free_memory_bytes >> 4;
-            if (allocatable_states > num_states_local)
-            {
-                uint64_t const swap_buffer_total_length_avail = allocatable_states - num_states_local;
-                int const log_swap_buffer_total_length_avail = atlc::log2_int(swap_buffer_total_length_avail);
-                if (log_swap_buffer_total_length_avail >= num_qubits_local - 1)
-                {
-                    log_swap_buffer_total_length = num_qubits_local - 1;
-                }
-                else
-                {
-                    log_swap_buffer_total_length = log_swap_buffer_total_length_avail;
-                    fprintf(
-                        stderr,
-                        "[warn] swap buffer length reduced due to free memory limit (log=%d, target=%d).\n",
-                        log_swap_buffer_total_length,
-                        num_qubits_local - 1);
-                }
-            }
-            else
-            {
-                log_swap_buffer_total_length = 0;
-                fprintf(
-                    stderr,
-                    "[warn] insufficient free memory for additional swap buffer allocation (bytes=%zu).\n",
-                    initial_free_memory_bytes);
-            }
-            swap_buffer_total_length = UINT64_C(1) << log_swap_buffer_total_length;
 #ifdef QCS_ENABLE_NVSHMEM
             if constexpr (exchange_nvshmem_registered_put)
             {
@@ -1432,16 +1406,12 @@ namespace qcs
                     throw std::runtime_error("NVSHMEM exchange requested grid is unsupported on at least one PE; see rank diagnostics");
                 exchange_grid_blocks = requested_blocks;
                 swap_buffer_total_length = uint64_t(exchange_grid_blocks) * exchange_chunk_elements;
-                swap_buffer = static_cast<qcs::complex_t *>(nvshmem_malloc(swap_buffer_total_length * sizeof(qcs::complex_t)));
-                if (!swap_buffer)
-                    throw std::runtime_error("NVSHMEM staging allocation failed: requested " +
-                        std::to_string(uint64_t(exchange_grid_blocks) * exchange_chunk_bytes) +
-                        " bytes; increase NVSHMEM_SYMMETRIC_SIZE and ensure sufficient GPU memory");
-                exchange_signals = static_cast<uint64_t *>(nvshmem_malloc(2 * exchange_grid_blocks * sizeof(uint64_t)));
-                if (!exchange_signals)
-                    throw std::runtime_error("NVSHMEM signal allocation failed: requested " +
-                        std::to_string(uint64_t(2) * exchange_grid_blocks * sizeof(uint64_t)) +
-                        " bytes in addition to staging; increase NVSHMEM_SYMMETRIC_SIZE and ensure sufficient GPU memory");
+                size_t const staging_bytes = swap_buffer_total_length * sizeof(qcs::complex_t);
+                size_t const signal_offset = (staging_bytes + 255) / 256 * 256;
+                size_t const signal_bytes = size_t(2) * exchange_grid_blocks * sizeof(uint64_t);
+                scratch.allocate_symmetric(signal_offset + signal_bytes);
+                swap_buffer = static_cast<qcs::complex_t *>(scratch.symmetric.take(staging_bytes));
+                exchange_signals = static_cast<uint64_t *>(scratch.symmetric.take(signal_bytes));
                 ATLC_CHECK_CUDA(cudaMemsetAsync, exchange_signals, 0, 2 * exchange_grid_blocks * sizeof(uint64_t), stream);
                 // No peer may publish a signal until every PE has initialized
                 // its local counters, including after a later reallocation.
@@ -1452,11 +1422,23 @@ namespace qcs
                     properties.multiProcessorCount, exchange_grid_blocks, exchange_threads,
                     exchange_chunk_bytes, uint64_t(exchange_grid_blocks) * exchange_chunk_bytes);
             }
-            else
 #endif
-                ATLC_CHECK_CUDA(cudaMallocAsync, &swap_buffer, swap_buffer_total_length * sizeof(qcs::complex_t), stream);
-
-            measurement_workspace = std::make_unique<measurement_detail::workspace>(stream);
+            scratch.allocate_remaining(stream);
+            measurement_workspace = std::make_unique<measurement_detail::workspace>(stream, scratch.device);
+            if constexpr (!exchange_nvshmem_registered_put)
+            {
+                uint64_t const available = scratch.device.available() / sizeof(qcs::complex_t);
+                if (!available) throw std::runtime_error("work buffer: no room for swap buffer");
+                log_swap_buffer_total_length = std::min(std::max(0, num_qubits_local - 1),
+                                                        static_cast<int>(atlc::log2_int(available)));
+                swap_buffer_total_length = UINT64_C(1) << log_swap_buffer_total_length;
+                if (log_swap_buffer_total_length < num_qubits_local - 1)
+                    fprintf(stderr, "[warn] swap buffer length reduced by work buffer capacity (log=%d, target=%d).\n",
+                            log_swap_buffer_total_length, num_qubits_local - 1);
+                // take() aligns slices to 256 bytes; include padding in capacity.
+                swap_buffer = static_cast<qcs::complex_t *>(scratch.device.take(
+                    swap_buffer_total_length * sizeof(qcs::complex_t)));
+            }
         }
 
         void free_memory()
@@ -1474,8 +1456,9 @@ namespace qcs
                 {
                     ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
                     ATLC_CHECK_MPI(MPI_Barrier, MPI_COMM_WORLD);
-                    if (exchange_signals) { nvshmem_free(exchange_signals); exchange_signals = nullptr; }
-                    if (swap_buffer) { nvshmem_free(swap_buffer); swap_buffer = nullptr; }
+                    scratch.close();
+                    exchange_signals = nullptr;
+                    swap_buffer = nullptr;
                     if (state_data_device)
                     {
                         check_nvshmem(nvshmemx_buffer_unregister(state_data_device), "nvshmemx_buffer_unregister");
@@ -1490,11 +1473,9 @@ namespace qcs
                 ATLC_CHECK_CUDA(cudaFreeAsync, state_data_device, stream);
                 state_data_device = NULL;
             }
-            if (swap_buffer)
-            {
-                ATLC_CHECK_CUDA(cudaFreeAsync, swap_buffer, stream);
-                swap_buffer = NULL;
-            }
+            scratch.close();
+            swap_buffer = nullptr;
+            swap_buffer_total_length = 0;
             this->num_qubits = 0;
         }
 

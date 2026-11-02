@@ -35,18 +35,27 @@ $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQC
 	mkdir -p $(dir $@)
 	$(CXX) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
-$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh include/qcs.h
+$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) -fPIC -shared src/qcs.cu -o $@ $(NVCC_LDFLAGS)
 
 MEASUREMENT_REDUCE_TEST ?= bin/measurement_reduce_test
-$(MEASUREMENT_REDUCE_TEST): tests/measurement_reduce_test.cu src/measurement_reduce.cuh
+$(MEASUREMENT_REDUCE_TEST): tests/measurement_reduce_test.cu src/measurement_reduce.cuh src/work_buffer.hpp
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) tests/measurement_reduce_test.cu -o $@ $(LDFLAGS_VENDOR) --cudart=shared
 
 .PHONY: test-measurement-reduce
 test-measurement-reduce: $(MEASUREMENT_REDUCE_TEST)
 	./$(MEASUREMENT_REDUCE_TEST)
+
+WORK_BUFFER_TEST ?= bin/work_buffer_test
+$(WORK_BUFFER_TEST): tests/work_buffer_test.cpp src/work_buffer.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-work-buffer
+test-work-buffer: $(WORK_BUFFER_TEST)
+	$(WORK_BUFFER_TEST)
 
 # MPI_CXX must use the MPI installation linked into libqcs.
 MPI_CXX ?= mpicxx
@@ -65,7 +74,7 @@ gengetopt: src/qcs_args.ggo
 
 .PHONY: clean
 clean:
-	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST)
+	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST) $(WORK_BUFFER_TEST)
 
 # Compile private instrumented source copies, including the recorded CUB tree.
 # Vendor flags must include the same MPI headers/libraries as the production build.
@@ -75,7 +84,7 @@ MEASUREMENT_HARNESS_DIR ?= bin/measurement-harness-$(MEASUREMENT_METADATA)
 MEASUREMENT_HARNESS = $(MEASUREMENT_HARNESS_DIR)/measurement_harness
 MEASUREMENT_HARNESS_ARGS ?= regression 12
 
-$(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh)
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh $(MEASUREMENT_HARNESS_SOURCE)/src/work_buffer.*)
 	python3 scripts/prepare_measurement_harness.py --source $(MEASUREMENT_HARNESS_SOURCE) --output $(MEASUREMENT_HARNESS_DIR) --metadata $(MEASUREMENT_METADATA)
 
 $(MEASUREMENT_HARNESS): tests/measurement_harness.cu tests/measurement_sampling_cases.hpp tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu

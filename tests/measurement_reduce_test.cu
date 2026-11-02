@@ -298,6 +298,37 @@ int main()
             workspace.close();
             workspace.close(); // explicit teardown is idempotent
             compare(workspace, input, nonuniform(1), zero); // safe reinitialization
+
+            // Simulator mode borrows one fixed slice. Closing it must leave
+            // both the backing allocation and the adjacent swap slice alive.
+            auto largest = md::resources<4>(workspace.device());
+            size_t bytes = md::allocation_bytes(
+                md::checked_product(16, uint64_t(largest.blocks) + 1), sizeof(double));
+            bytes = (bytes + 255) / 256 * 256 + 256;
+            void* backing = nullptr;
+            ATLC_CHECK_CUDA(cudaMalloc, &backing, bytes);
+            qcs::buffer_arena arena(backing, bytes);
+            {
+                md::workspace borrowed(stream, arena);
+                void* swap = arena.take(256);
+                ATLC_CHECK_CUDA(cudaMemsetAsync, swap, 0x5a, 256, stream);
+                auto* original = borrowed.data();
+                analytic_order(borrowed, input);
+                fixtures<1>(borrowed, input, 512);
+                fixtures<2>(borrowed, input, 512);
+                fixtures<3>(borrowed, input, 512);
+                fixtures<4>(borrowed, input, 512);
+                require(borrowed.data() == original, "borrowed workspace moved");
+                borrowed.close();
+                borrowed.close();
+                std::array<unsigned char, 256> guard{};
+                ATLC_CHECK_CUDA(cudaMemcpyAsync, guard.data(), swap, guard.size(), cudaMemcpyDeviceToHost, stream);
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                require(std::all_of(guard.begin(), guard.end(), [](unsigned char v) { return v == 0x5a; }),
+                        "measurement overwrote adjacent swap storage");
+                ATLC_CHECK_CUDA(cudaMemsetAsync, backing, 0, bytes, stream);
+            }
+            ATLC_CHECK_CUDA(cudaFreeAsync, backing, stream);
         }
         ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
         ATLC_CHECK_CUDA(cudaStreamDestroy, stream);
