@@ -2202,7 +2202,7 @@ namespace qcs
         } /* save_statevector */
 
         template <int N>
-        MeasureNorm<N> reduce_measure_norm(
+        qcs::float_t* reduce_measure_norm(
             int num_local_targets, const cuda::std::array<int, N> &local_outcome_bits,
             uint64_t fixed_outcome)
         {
@@ -2224,14 +2224,8 @@ namespace qcs
             for (int physical : negative_control_qubit_num_physical_local_list)
                 descriptor.control_mask |= UINT64_C(1) << physical;
 
-            auto output = measurement_workspace->enqueue<N>(
+            return measurement_workspace->enqueue<N>(
                 state_data_device, num_states_local, descriptor, stream);
-            MeasureNorm<N> norm{};
-            ATLC_CHECK_CUDA(cudaMemcpyAsync, norm.data(), output, sizeof(MeasureNorm<N>), cudaMemcpyDeviceToHost, stream);
-            // MPI must only see completed host results. This is the existing
-            // measurement boundary; no device-wide synchronization is needed.
-            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
-            return norm;
         }
 
         template <int N>
@@ -2283,13 +2277,20 @@ namespace qcs
             check_control_qubit_num_physical();
             prepare_operating_gate();
 
-            MeasureNorm<N> local_norm{};
-            if (proc_num_control_condition)
-                local_norm = reduce_measure_norm<N>(target_qubit_num_logical_list.size(), local_outcome_bits, fixed_outcome);
+            // Every rank supplies all outcome bins, including ranks excluded by
+            // earlier measurements. Clear their output rather than reuse weights.
+            qcs::float_t* const norm_device = proc_num_control_condition
+                ? reduce_measure_norm<N>(target_qubit_num_logical_list.size(), local_outcome_bits, fixed_outcome)
+                : measurement_workspace->enqueue_zero<N>(stream);
 
+            static_assert(std::is_same<qcs::float_t, double>::value, "measurement NCCL type must match float_t");
+            ATLC_CHECK_NCCL(ncclAllReduce, norm_device, norm_device, 1 << N, ncclDouble, ncclSum, nccl_comm, stream);
+
+            // Transitional host boundary: part 2 will move validation and sampling
+            // to the GPU. The same stream orders local weights, NCCL and this copy.
             MeasureNorm<N> global_norm{};
-            static_assert(std::is_same<qcs::float_t, double>::value, "measurement MPI type must match float_t");
-            ATLC_CHECK_MPI(MPI_Allreduce, local_norm.data(), global_norm.data(), 1 << N, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, global_norm.data(), norm_device, (1 << N) * sizeof(qcs::float_t), cudaMemcpyDeviceToHost, stream);
+            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
             // Validate on every rank before the broadcast, including each bin.
             qcs::float_t const total = measurement::measure_norm_sum<N>(global_norm);
             uint64_t outcome = 0;

@@ -241,7 +241,8 @@ launch_config resources(int device)
 
 // Single owner, bound to the construction device and caller-owned stream.
 // Keep that stream alive through close/destruction. Calls must be serialized by
-// the owner. Result storage is valid until the next enqueue or close.
+// the owner. Result storage is valid until the next reserve, enqueue,
+// enqueue_zero or close, and may be consumed in place on the owner stream.
 class workspace
 {
     int device_ = -1;
@@ -316,6 +317,17 @@ public:
             capacity_ = required;
         }
         return config;
+    }
+
+    template<int N>
+    double* enqueue_zero(cudaStream_t stream)
+    {
+        auto config = reserve<N>(stream);
+        uint64_t partial_elements = checked_product(UINT64_C(1) << N, config.blocks);
+        double* output = data_ + partial_elements;
+        ATLC_CHECK_CUDA(cudaMemsetAsync, output, 0,
+                        allocation_bytes(UINT64_C(1) << N, sizeof(double)), stream);
+        return output;
     }
 
     template<int N>
