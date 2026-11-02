@@ -33,7 +33,7 @@ sharedlibrary: $(LIBQCS_SO)
 
 $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQCS_SO)
 	mkdir -p $(dir $@)
-	$(CXX) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
+	$(CXX) $(INCLUDE) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
 $(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp include/qcs.h
 	mkdir -p $(dir $@)
