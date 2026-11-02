@@ -213,9 +213,27 @@ struct rounded_add
     }
 };
 
-template<int N>
+// Internal diagnostics are compiled out of the production specialization.
+struct sample_diagnostics
+{
+    double cumulative[16];
+    uint4 raw;
+    double uniform;
+};
+
+__device__ inline uint4 measurement_random(uint64_t seed, uint64_t counter)
+{
+    curandStatePhilox4_32_10_t rng;
+    curand_init(static_cast<unsigned long long>(seed),
+                static_cast<unsigned long long>(counter), 0ULL, &rng);
+    return curand4(&rng);
+}
+
+template<int N, bool Inspect = false>
 __global__ void sample_outcome(const double* weights, uint64_t seed,
-                               uint64_t counter, sample_result* result)
+                               uint64_t counter, sample_result* result,
+                               sample_diagnostics* diagnostics = nullptr,
+                               double controlled_uniform = -1.0)
 {
     static_assert(N >= 1 && N <= 4);
     constexpr unsigned bins = 1u << N;
@@ -228,7 +246,15 @@ __global__ void sample_outcome(const double* weights, uint64_t seed,
     scan(scratch).InclusiveScan(weight, prefix, rounded_add{});
     cumulative[lane] = prefix;
     __syncthreads();
+    if constexpr (Inspect)
+        if (lane < bins) diagnostics->cumulative[lane] = prefix;
     if (lane != 0) return;
+    if constexpr (Inspect)
+    {
+        diagnostics->raw = measurement_random(seed, counter);
+        uint64_t m = (uint64_t(diagnostics->raw.x) << 21) | (uint64_t(diagnostics->raw.y) >> 11);
+        diagnostics->uniform = static_cast<double>(m) * 0x1.0p-53;
+    }
 
     *result = {0, sample_status::invalid_weight};
     for (unsigned i = 0; i < bins; ++i)
@@ -239,12 +265,11 @@ __global__ void sample_outcome(const double* weights, uint64_t seed,
 
     // No rank, geometry or probability data enters this mapping. One Philox
     // subsequence per logical measurement; fixed offset and fixed raw outputs.
-    curandStatePhilox4_32_10_t rng;
-    curand_init(static_cast<unsigned long long>(seed),
-                static_cast<unsigned long long>(counter), 0ULL, &rng);
-    uint4 bits = curand4(&rng);
+    uint4 bits = measurement_random(seed, counter);
     uint64_t mantissa = (uint64_t(bits.x) << 21) | (uint64_t(bits.y) >> 11);
     double u = static_cast<double>(mantissa) * 0x1.0p-53; // Exactly [0,1).
+    if constexpr (Inspect)
+        if (controlled_uniform >= 0.0) u = controlled_uniform;
     double threshold = __dmul_rn(u, total);
     if (!(threshold < total)) threshold = nextafter(total, 0.0);
 

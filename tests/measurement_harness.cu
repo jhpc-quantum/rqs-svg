@@ -60,6 +60,10 @@ static void measure(qcs_simulator* sim, const std::vector<bit_num_t>& targets) {
     }
 }
 
+#if MEASUREMENT_GPU_SAMPLING
+#include "measurement_sampling_cases.hpp"
+#endif
+
 static std::vector<qcs::complex_t> prepared(qcs::simulator_core& c) {
     std::vector<qcs::complex_t> state(c.num_states_local);
     // Exactly reproducible, unequal masses; global scale bounds the total norm.
@@ -80,8 +84,25 @@ static void restore(qcs::simulator_core& c, const std::vector<qcs::complex_t>& s
 static void regression(qcs_simulator* sim) {
     auto& c = *sim->core;
     auto state = prepared(c);
+#if MEASUREMENT_GPU_SAMPLING
+    qcs::measurement_detail::sample_result expected_sample{};
+    measurement_probe::result_observer = [&](unsigned outcome, unsigned status) {
+        require(outcome == expected_sample.outcome && status == static_cast<unsigned>(expected_sample.status),
+                "production result differs from diagnostic sampler");
+    };
+#endif
     measurement_probe::observer = [&](int n, const int* t, const double* l, const double* g) {
         check_probabilities(c, n, t, l, g);
+#if MEASUREMENT_GPU_SAMPLING
+        sampling_cases::fixture f(c.stream);
+        std::vector<double> weights(g, g + (1 << n));
+        switch (n) {
+#define CHECK_SAMPLE(N) case N: f.run<N>(weights, -1, qcs::measurement_detail::sample_status::success, 0, c.measurement_counter, c.rng_seed); break
+            CHECK_SAMPLE(1); CHECK_SAMPLE(2); CHECK_SAMPLE(3); CHECK_SAMPLE(4);
+#undef CHECK_SAMPLE
+        }
+        expected_sample = f.last_result;
+#endif
     };
     // Every feasible N/L, with unsorted local/global physical positions and a
     // permutation crossing the local/global boundary. A second pass includes
@@ -111,6 +132,7 @@ static void regression(qcs_simulator* sim) {
         measure(sim, targets); // all remainder widths, multiple complete groups
     }
     measurement_probe::observer = {};
+    measurement_probe::result_observer = {};
     double error;
     ATLC_CHECK_MPI(MPI_Allreduce, &max_error, &error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     if (!c.proc_num) std::cout << "oracle_vectors_per_rank=" << vectors_checked
@@ -222,11 +244,19 @@ int main(int argc, char** argv) {
         require(sim->core->num_procs == 1 || sim->core->num_procs == 2 || sim->core->num_procs == 4,
                 "harness supports 1, 2 or 4 ranks, one GPU per rank");
         qcs_simulator_set_num_qubits_cxx(sim, qubits);
+        qcs_simulator_set_num_clbits_cxx(sim, qubits);
         std::vector<bit_num_t> mapping(qubits);
         for (int p = 0; p < qubits; ++p) mapping[p] = qubits - p - 1;
         qcs_simulator_set_mapping_cxx(sim, mapping.data(), qubits);
         qcs_simulator_allocate_memory_cxx(sim);
-        if (bench) benchmark(sim, warmups, repetitions); else regression(sim);
+        if (bench) benchmark(sim, warmups, repetitions);
+        else {
+#if MEASUREMENT_GPU_SAMPLING
+            sampling_cases::run(sim);
+            sampling_cases::lifecycle(sim);
+#endif
+            regression(sim);
+        }
         qcs_simulator_destroy_cxx(sim);
         return 0;
     } catch (const std::exception& error) {

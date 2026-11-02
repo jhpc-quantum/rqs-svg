@@ -257,39 +257,50 @@ partials into the outcome bins. The first target is the least significant bit
 of the internal joint outcome; unsorted targets and logical-to-physical mappings
 retain their caller-order output positions.
 
-Each such group uses one MPI sum over its `2^N` masses and one outcome broadcast.
-Inactive ranks contribute zeros and still join both collectives. Sampling uses
-`[0,total)` after validating every bin and the total, so normalization is not
-required. Global-only targets still reduce local norms, using rank bits for
-their outcomes without exchanging statevector amplitudes or changing the mapping.
-Already measured targets retain their recorded values; a fully recorded group
-needs no reduction, collective, or random draw. Projection remains deferred until
-needed by a gate or statevector output, while discarded branches are excluded
-from subsequent norm reductions.
+Each fresh group sums corresponding outcome bins with an in-place NCCL
+AllReduce. Inactive ranks contribute zeros and still reduce and sample. On each
+GPU, a fixed CUB warp scan forms cumulative weights and a local Philox draw
+selects the first positive bin with cumulative weight strictly above `u*total`.
+Weights need not be normalized. Invalid components or totals fail through the
+existing C error return (or C++ exception). Only an eight-byte outcome/status
+returns to the CPU; probability arrays stay on device.
 
-`measure_group_size` in `src/qcs.cu` selects widths 1–4; the public C API is
-unchanged. A simulator-owned workspace in `src/measurement_reduce.cuh` reuses
-partial and output storage, growing together as needed. It is bound to the
-simulator's device and stream, and releases storage on that stream when state
-memory is freed. Both kernels and the result download use that same stream;
-the host copy completes before MPI reads it. Wider groups increase storage
-exponentially and are not necessarily faster. Joint sampling preserves
-probability distributions, but consumes fewer random draws than sequential
-measurement, and summation order can affect seeded results.
+The RNG maps the common setup seed and a simulator-lifetime 64-bit group counter
+to a uniform in `[0,1)`. Each successfully sampled group advances once on every
+rank, including deterministic distributions and ranks contributing zero. Empty
+and entirely cached groups do not advance. State preparation, measurement resets
+and between-shot resets preserve the counter; exhaustion throws without wrapping.
+The setup seed broadcast remains; sampling broadcasts no state, draw or outcome.
 
-Focused reducer tests remain in `tests/measurement_reduce_test.cu`. Public API
-integration coverage in `tests/measurement_integration_test.cpp` uses nonuniform
-basis states and a biased correlated state, including unsorted classical
-assignments, repeated measurements, deferred projection, and input errors.
-Build and run on a configured CUDA/MPI machine with:
+Equal seed/counter inputs yield equal raw draws. Agreement within a distributed
+run requires identical NCCL bins and compatible compiled scan arithmetic on all
+GPUs. Exact outcome sequences across GPU counts, decompositions, architectures
+or toolkit versions are not guaranteed: floating-point reduction can change.
+The legacy CPU RNG sequence is not preserved.
+
+Global-only targets use rank bits without exchanging amplitudes or changing the
+mapping. Already measured targets retain recorded values, and entirely cached
+groups need no collective or draw. Projection remains deferred until a gate or
+statevector output requires it. `measure_group_size` selects widths 1–4, with a
+maximum and default of four. The simulator workspace reuses partial/output/result
+storage after warm-up on the owning device and stream.
+
+See [measurement documentation](docs/measurement-reducer.md) for RNG mapping,
+numerical boundaries, regression coverage, multi-node launch instructions,
+profiling, and the execution report. On a configured CUDA/MPI machine:
 
 ```sh
 make target sharedlibrary
 make test-measurement-reduce
 make test-measurement-integration
-# One GPU per rank; also run with 4 and 8 ranks where available.
-mpirun -np 2 ./bin/measurement_integration_test
+make test-measurement-distributed RANKS=1
+make test-measurement-distributed RANKS=2
+make test-measurement-distributed RANKS=4
+mpiexec -n 2 ./bin/measurement_integration_test
 ```
+
+These tests have not been compiled or run for this change; tests and validation
+were explicitly skipped.
 
 ## Running
 

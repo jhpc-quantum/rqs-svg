@@ -78,7 +78,7 @@ MEASUREMENT_HARNESS_ARGS ?= regression 12
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh)
 	python3 scripts/prepare_measurement_harness.py --source $(MEASUREMENT_HARNESS_SOURCE) --output $(MEASUREMENT_HARNESS_DIR) --metadata $(MEASUREMENT_METADATA)
 
-$(MEASUREMENT_HARNESS): tests/measurement_harness.cu tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
+$(MEASUREMENT_HARNESS): tests/measurement_harness.cu tests/measurement_sampling_cases.hpp tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
 	$(NVCC) $(NVCC_CFLAGS) -I$(abspath $(MEASUREMENT_HARNESS_DIR)) tests/measurement_harness.cu -o $@ $(NVCC_LDFLAGS)
 
 .PHONY: measurement-harness test-measurement-distributed benchmark-measurement

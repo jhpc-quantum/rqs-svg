@@ -144,6 +144,28 @@ int main()
                 "classical count rejection");
         require(!qcs_simulator_measure_many_to_clbits(sim, targets, 2, duplicate, 2, results),
                 "duplicate classical destination rejection");
+        // Independent fresh biased Bell shots. Seven binomial standard deviations
+        // plus two counts bounds random false failures without legacy RNG parity.
+        constexpr int shots = 2048;
+        int ones = 0;
+        const double probability = std::pow(std::sin(theta / 2), 2);
+        for (int shot = 0; shot < shots; ++shot) {
+            qcs_simulator_set_zero_state_cxx(sim);
+            qcs_simulator_gate_ry_cxx(sim, theta, &bell_root, 1, nullptr, 0, nullptr, 0);
+            qcs_simulator_gate_x_cxx(sim, &bell_other, 1, nullptr, 0, &bell_root, 1);
+            const bit_num_t pair[] = {bell_other, bell_root};
+            bit_t sampled[2]{};
+            qcs_simulator_measure_many_cxx(sim, pair, 2, sampled);
+            require(sampled[0] == sampled[1], "stochastic Bell correlation");
+            int value = sampled[0], low, high;
+            MPI_Allreduce(&value, &low, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            MPI_Allreduce(&value, &high, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            require(low == high, "stochastic shot rank agreement");
+            ones += value;
+        }
+        require(std::abs(ones - shots * probability) <=
+                7 * std::sqrt(shots * probability * (1 - probability)) + 2,
+                "biased Bell frequency outside statistical tolerance");
         if (rank == 0) std::puts("measurement integration passed");
         qcs_simulator_destroy_cxx(sim);
         return 0;
