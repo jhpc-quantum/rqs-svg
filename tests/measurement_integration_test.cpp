@@ -67,6 +67,31 @@ int main()
         require(qcs_simulator_measure_many(sim, targets, 9, repeated), "repeat group");
         for (int i = 0; i < 9; ++i) require(repeated[i] == results[i], "repeat stability");
 
+        // Every possible smaller remainder, with fresh metadata between shots.
+        for (int count = 5; count <= 10; ++count)
+        {
+            qcs_simulator_set_zero_state_cxx(sim);
+            x(sim, 2);
+            std::vector<bit_num_t> request(count);
+            std::vector<bit_t> bits(count);
+            for (int i = 0; i < count; ++i) request[i] = count - 1 - i;
+            qcs_simulator_measure_many_cxx(sim, request.data(), count, bits.data());
+            for (int i = 0; i < count; ++i)
+                require(bits[i] == (request[i] == 2), "fresh shot/remainder width");
+        }
+
+        // Bell correlations with a global endpoint under the reverse mapping.
+        qcs_simulator_set_zero_state_cxx(sim);
+        const bit_num_t bell_root = 0, bell_other = 9;
+        qcs_simulator_gate_h_cxx(sim, &bell_root, 1, nullptr, 0, nullptr, 0);
+        qcs_simulator_gate_x_cxx(sim, &bell_other, 1, nullptr, 0, &bell_root, 1);
+        const int bell_branch = qcs_simulator_measure_cxx(sim, bell_root);
+        require(qcs_simulator_measure_cxx(sim, bell_other) == bell_branch, "Bell correlation");
+        int min_branch, max_branch;
+        MPI_Allreduce(&bell_branch, &min_branch, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(&bell_branch, &max_branch, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        require(min_branch == max_branch, "rank agreement");
+
         // Biased GHZ has only two correlated outcomes. After measuring one bit,
         // all later fresh bins must exclude its discarded, still pending branch.
         qcs_simulator_set_zero_state_cxx(sim);

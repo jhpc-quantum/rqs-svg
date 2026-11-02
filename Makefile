@@ -66,3 +66,38 @@ gengetopt: src/qcs_args.ggo
 .PHONY: clean
 clean:
 	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST)
+
+# Compile private instrumented source copies, including the recorded CUB tree.
+# Vendor flags must include the same MPI headers/libraries as the production build.
+MEASUREMENT_METADATA ?= constant
+MEASUREMENT_HARNESS_SOURCE ?= $(CURDIR)
+MEASUREMENT_HARNESS_DIR ?= bin/measurement-harness-$(MEASUREMENT_METADATA)
+MEASUREMENT_HARNESS = $(MEASUREMENT_HARNESS_DIR)/measurement_harness
+MEASUREMENT_HARNESS_ARGS ?= regression 12
+
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh)
+	python3 scripts/prepare_measurement_harness.py --source $(MEASUREMENT_HARNESS_SOURCE) --output $(MEASUREMENT_HARNESS_DIR) --metadata $(MEASUREMENT_METADATA)
+
+$(MEASUREMENT_HARNESS): tests/measurement_harness.cu tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
+	$(NVCC) $(NVCC_CFLAGS) -I$(abspath $(MEASUREMENT_HARNESS_DIR)) tests/measurement_harness.cu -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: measurement-harness test-measurement-distributed benchmark-measurement
+measurement-harness: $(MEASUREMENT_HARNESS)
+test-measurement-distributed: $(MEASUREMENT_HARNESS)
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) $(MEASUREMENT_HARNESS_ARGS)
+benchmark-measurement: $(MEASUREMENT_HARNESS)
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) benchmark $(BENCH_QUBITS) $(BENCH_WARMUPS) $(BENCH_REPETITIONS)
+
+MPIEXEC ?= mpiexec
+RANKS ?= 1
+BENCH_QUBITS ?= 12
+BENCH_WARMUPS ?= 5
+BENCH_REPETITIONS ?= 30
+
+$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test: tests/measurement_integration_private.cu tests/measurement_integration_test.cpp tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
+	$(NVCC) $(NVCC_CFLAGS) -I$(abspath $(MEASUREMENT_HARNESS_DIR)) tests/measurement_integration_private.cu -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-measurement-metadata
+test-measurement-metadata: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test $(MEASUREMENT_HARNESS)
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) regression 12
