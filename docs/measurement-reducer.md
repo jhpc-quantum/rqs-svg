@@ -1,7 +1,8 @@
 # Measurement reducer and reproducible validation
 
 Production measurement uses the custom shared-memory, bin-major two-stage
-reducer in `src/measurement_reduce.cuh`. There is no production CUB backend.
+reducer in `src/measurement_reduce.cuh`. CUB is used for the subsequent
+small cumulative scan, rather than state-vector reduction.
 Double precision and the public API are unchanged; groups contain at most four
 qubits. The actual pre-migration baseline recorded before task 1 and the reviewed
 baseline are both `1ce55aff510934fd1502abf933e8c26a1db79133`.
@@ -33,11 +34,81 @@ occupancy are checked on first use. There is no fallback or measured tuning.
 Each simulator owns one device/stream-bound workspace. It grows on demand and
 reuses storage; all used elements are overwritten. `enqueue` launches both stages
 without synchronization and returns device bins valid until the next call or
-close. Results are copied and the stream is synchronized before MPI aggregation.
+close. NCCL AllReduce sums the output bins in place on the same stream, followed
+by the device sampler and an eight-byte outcome/status copy. Only that final
+readback is followed by stream synchronization; weights and prefixes remain on
+the device throughout production sampling.
 The owning stream must outlive the workspace; explicit `close()` reports release
 errors. Descriptor shifts, allocation products, and indexing use checked 64-bit
 operations. The reducer receives metadata by value and does not depend on the
 gate constant/global metadata storage selector.
+
+## Device sampling and measurement RNG
+
+After NCCL, `sample_outcome<N>` launches exactly one block of 32 threads for
+N=1..4 (2..16 bins). It uses `cub::BlockScan<double, 32,
+cub::BLOCK_SCAN_RAKING>` with one item per lane and zero padding. Original
+weights remain available beside the shared cumulative array. The scan uses an
+explicit round-to-nearest double addition operator (`__dadd_rn`). It takes its
+total from cumulative entry `2^N-1`; no separate total reduction is performed.
+Thread zero checks every original weight for finiteness and nonnegativity and
+the total for finiteness and strict positivity before drawing. Invalid weights
+or totals return distinct compact status codes and do not advance the counter.
+
+Reproducible selection assumes NCCL supplies bitwise identical reduced bins to
+all ranks, and all participating GPUs execute the same compiled CUB scan
+implementation with the same CUDA/CUB version, compiler flags, target compute
+capability, and IEEE double arithmetic. Fixed geometry, the explicit raking
+algorithm and rounded additions keep the prefix addition order independent of
+local state size, SM count and reducer launch geometry. A default DeviceScan
+policy is not used. Cross-architecture or mixed-toolchain runs are outside these
+assumptions until agreement is established. There is no broadcast to repair
+prefix, random-value or outcome disagreement. Agreement has **not been
+validated** in this change because tests and validation were explicitly skipped.
+Part 3 must compare prefixes and outcomes on the supported GPU configurations.
+
+The device creates a local `curandStatePhilox4_32_10_t` using
+`curand_init(common_rng_seed, measurement_counter, 0, &state)` and calls
+`curand4` once. It forms the 53-bit integer `(uint64_t(bits.x) << 21) |
+(uint64_t(bits.y) >> 11)` and multiplies by `2^-53` to obtain `u` in `[0,1)`.
+No cuRAND uniform endpoint convention is involved. No rank, GPU identity,
+thread identity, local mass, timing, or local domain size enters this mapping.
+The existing one-time seed broadcast remains; no RNG state, counter, draw or
+outcome is communicated. State-vector initialization retains its independent,
+rank-dependent cuRAND generator and seeds.
+
+Each simulator initializes its replicated 64-bit counter to zero through its
+member initializer, once per simulator lifetime. A successfully sampled group
+with any previously unmeasured target consumes its current value, including a
+deterministic distribution and ranks contributing zero weights. After successful
+status readback the counter advances, before updating measurement bookkeeping.
+Empty requests and entirely cached groups consume nothing. Rejected arguments,
+invalid distributions and failed sampler/readback operations do not advance it.
+State initialization, mapping resets, measurement/classical bookkeeping resets
+and resets between shots never reset the cursor. Sampling counter `UINT64_MAX`
+sets a separate exhausted flag; the next fresh measurement throws before
+reduction instead of wrapping. Cached measurements still work after exhaustion.
+
+The threshold is the rounded product `u * total`, clamped with
+`nextafter(total, 0)` if rounding reaches the upper endpoint. Selection scans bins
+in request order and takes the first original positive-weight bin whose prefix
+is strictly greater than the threshold. An endpoint fallback chooses the last
+positive-weight bin, so a trailing zero bin is never selected. This preserves
+outcome bit `i` as requested qubit `qubits[i]`.
+
+The sampler reuses the dead partial-reduction storage for its eight-byte result
+(two 32-bit fields: outcome and status), without another allocation or teardown
+resource. The synchronous API reads back only this result and retains its
+existing measured masks, value lists, pending projections and classical-bit
+updates. No state-vector exchange is introduced. Production host validation,
+cumulative summation, random draws and outcome broadcasts have been removed.
+The old `std::mt19937_64` measurement sequence is intentionally not preserved.
+
+No builds, smoke checks, tests, sanitizer runs, device probes or numerical/
+distributed validation were run for this change, as requested. The older private
+harness below instruments the pre-NCCL host aggregation boundary and needs the
+part 3 update before it can exercise this path; its historical timing descriptions
+do not describe the new production sampling boundary.
 
 ## Regression harnesses
 

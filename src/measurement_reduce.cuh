@@ -6,6 +6,8 @@
 // and reduction_resources. Upstream supplies no license file or source notices
 // at that revision. Only custom + shared accumulators + bin-major is used here.
 #include <cuda_runtime.h>
+#include <cub/block/block_scan.cuh>
+#include <curand_kernel.h>
 #include <cuda/std/complex>
 #include <atlc/check_cuda.hpp>
 #include <array>
@@ -187,6 +189,80 @@ __global__ void second_stage(const double* partials, double* output)
     }
 }
 
+// The sampler always uses one complete warp, independently of reducer geometry.
+// Keep original weights intact: eligibility is based on weights, not prefixes.
+enum class sample_status : uint32_t
+{
+    success = 0,
+    invalid_weight = 1,
+    invalid_total = 2,
+};
+
+struct sample_result
+{
+    uint32_t outcome;
+    sample_status status;
+};
+static_assert(sizeof(sample_result) == sizeof(double));
+
+struct rounded_add
+{
+    __device__ double operator()(double a, double b) const
+    {
+        return __dadd_rn(a, b);
+    }
+};
+
+template<int N>
+__global__ void sample_outcome(const double* weights, uint64_t seed,
+                               uint64_t counter, sample_result* result)
+{
+    static_assert(N >= 1 && N <= 4);
+    constexpr unsigned bins = 1u << N;
+    using scan = cub::BlockScan<double, 32, cub::BLOCK_SCAN_RAKING>;
+    __shared__ typename scan::TempStorage scratch;
+    __shared__ double cumulative[32];
+    unsigned lane = threadIdx.x;
+    double weight = lane < bins ? weights[lane] : 0.0;
+    double prefix;
+    scan(scratch).InclusiveScan(weight, prefix, rounded_add{});
+    cumulative[lane] = prefix;
+    __syncthreads();
+    if (lane != 0) return;
+
+    *result = {0, sample_status::invalid_weight};
+    for (unsigned i = 0; i < bins; ++i)
+        if (!isfinite(weights[i]) || !(weights[i] >= 0.0)) return;
+    double total = cumulative[bins - 1];
+    result->status = sample_status::invalid_total;
+    if (!isfinite(total) || !(total > 0.0)) return;
+
+    // No rank, geometry or probability data enters this mapping. One Philox
+    // subsequence per logical measurement; fixed offset and fixed raw outputs.
+    curandStatePhilox4_32_10_t rng;
+    curand_init(static_cast<unsigned long long>(seed),
+                static_cast<unsigned long long>(counter), 0ULL, &rng);
+    uint4 bits = curand4(&rng);
+    uint64_t mantissa = (uint64_t(bits.x) << 21) | (uint64_t(bits.y) >> 11);
+    double u = static_cast<double>(mantissa) * 0x1.0p-53; // Exactly [0,1).
+    double threshold = __dmul_rn(u, total);
+    if (!(threshold < total)) threshold = nextafter(total, 0.0);
+
+    unsigned last_positive = 0;
+    for (unsigned i = 0; i < bins; ++i)
+    {
+        if (!(weights[i] > 0.0)) continue;
+        last_positive = i;
+        if (cumulative[i] > threshold)
+        {
+            *result = {i, sample_status::success};
+            return;
+        }
+    }
+    // Endpoint rounding must never choose a zero-weight trailing bin.
+    *result = {last_positive, sample_status::success};
+}
+
 struct launch_config
 {
     unsigned blocks = 0;
@@ -344,6 +420,22 @@ public:
         second_stage<N><<<config.blocks, block_size, 0, stream>>>(data_, output);
         ATLC_CHECK_CUDA(cudaGetLastError);
         return output;
+    }
+
+    template<int N>
+    sample_result* enqueue_sample(const double* weights, uint64_t seed,
+                                  uint64_t counter, cudaStream_t stream)
+    {
+        static_assert(N >= 1 && N <= 4);
+        require_owner(stream);
+        if (!data_ || !weights)
+            throw std::runtime_error("measurement sampler: missing weights/workspace");
+        // Reduction partials are dead after NCCL. Reuse their aligned storage
+        // for the compact result, disjoint from the live output weights.
+        auto* result = reinterpret_cast<sample_result*>(data_);
+        sample_outcome<N><<<1, 32, 0, stream>>>(weights, seed, counter, result);
+        ATLC_CHECK_CUDA(cudaGetLastError);
+        return result;
     }
 
     // Internal diagnostics used by the focused poison/reuse test.

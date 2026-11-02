@@ -25,6 +25,7 @@
 #include <array>
 #include <thread>
 #include <memory>
+#include <limits>
 
 #include <mpi.h>
 #include <cuda_runtime.h>
@@ -81,9 +82,6 @@ namespace qcs
     };
     constexpr event_sync_mode event_sync = event_sync_mode::blocking_sync;
     constexpr bool event_busy_loop_yield = true;
-
-    template <int N>
-    using MeasureNorm = cuda::std::array<qcs::float_t, (1 << N)>;
 
     static_assert(std::is_same<float_t, measurement_detail::real_type>::value);
     static_assert(std::is_same<complex_t, measurement_detail::state_type>::value);
@@ -973,44 +971,6 @@ namespace qcs
         gateobj.apply(s_in, s_out);
     }
 
-    namespace measurement
-    {
-        template <int N>
-        qcs::float_t measure_norm_sum(const MeasureNorm<N> &norm)
-        {
-            qcs::float_t total = 0;
-            for (auto const value : norm)
-            {
-                if (!(value >= 0) || !std::isfinite(value))
-                    throw std::runtime_error("invalid measurement probability component");
-                total += value;
-            }
-            if (!(total > 0) || !std::isfinite(total))
-                throw std::runtime_error("invalid measurement norm");
-            return total;
-        }
-
-        // The caller validates the distribution and draws in [0, total).
-        template <int N>
-        uint64_t select_measure_outcome(const MeasureNorm<N> &norm, qcs::float_t draw)
-        {
-            qcs::float_t cumulative = 0;
-            uint64_t last_positive = 0;
-            for (int outcome = 0; outcome < (1 << N); ++outcome)
-            {
-                if (!(norm[outcome] > 0))
-                    continue;
-                last_positive = outcome;
-                cumulative += norm[outcome];
-                if (draw < cumulative)
-                    return outcome;
-            }
-            // Rounding at the upper endpoint must never select a zero bin.
-            return last_positive;
-        }
-
-    } /* measurement */
-
     enum class initstate_enum
     {
         sequential,
@@ -1121,7 +1081,10 @@ namespace qcs
 
         int num_samples;
         unsigned int rng_seed;
-        std::mt19937_64 engine;
+        // Simulator-lifetime RNG cursor; state/bookkeeping/shot resets leave it
+        // untouched. Exhaustion is separate so UINT64_MAX can be sampled once.
+        uint64_t measurement_counter = 0;
+        bool measurement_counter_exhausted = false;
 
         int log_num_procs;
         int max_num_qubits_local_device;
@@ -1289,8 +1252,6 @@ namespace qcs
                 this->rng_seed = rng(); // & ((UINT64_C(1)<<12)-1);
             }
             ATLC_CHECK_MPI(MPI_Bcast, &this->rng_seed, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
-
-            engine = std::mt19937_64(rng_seed);
 
             state_data_device = NULL;
             swap_buffer = NULL;
@@ -2267,6 +2228,9 @@ namespace qcs
             if ((requested_mask & ~measured_mask_logical) == 0)
                 return fixed_outcome;
 
+            if (measurement_counter_exhausted)
+                throw std::runtime_error("measurement RNG counter exhausted");
+
             // Already measured targets stay controls, so they are never counted
             // twice or loaded from the discarded branch of a pending projection.
             positive_control_qubit_num_logical_list = measured_1_qubit_num_logical_list;
@@ -2286,20 +2250,22 @@ namespace qcs
             static_assert(std::is_same<qcs::float_t, double>::value, "measurement NCCL type must match float_t");
             ATLC_CHECK_NCCL(ncclAllReduce, norm_device, norm_device, 1 << N, ncclDouble, ncclSum, nccl_comm, stream);
 
-            // Transitional host boundary: part 2 will move validation and sampling
-            // to the GPU. The same stream orders local weights, NCCL and this copy.
-            MeasureNorm<N> global_norm{};
-            ATLC_CHECK_CUDA(cudaMemcpyAsync, global_norm.data(), norm_device, (1 << N) * sizeof(qcs::float_t), cudaMemcpyDeviceToHost, stream);
+            // Same-stream ordering: local reduction -> NCCL -> sampler ->
+            // compact readback. No host boundary or RNG/outcome collective.
+            auto* const result_device = measurement_workspace->enqueue_sample<N>(
+                norm_device, rng_seed, measurement_counter, stream);
+            measurement_detail::sample_result result{};
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, &result, result_device, sizeof(result), cudaMemcpyDeviceToHost, stream);
             ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
-            // Validate on every rank before the broadcast, including each bin.
-            qcs::float_t const total = measurement::measure_norm_sum<N>(global_norm);
-            uint64_t outcome = 0;
-            if (proc_num == 0)
-            {
-                std::uniform_real_distribution<qcs::float_t> distribution(0, total);
-                outcome = measurement::select_measure_outcome<N>(global_norm, distribution(engine));
-            }
-            ATLC_CHECK_MPI(MPI_Bcast, &outcome, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+            if (result.status == measurement_detail::sample_status::invalid_weight)
+                throw std::runtime_error("invalid measurement probability component");
+            if (result.status != measurement_detail::sample_status::success)
+                throw std::runtime_error("invalid measurement norm");
+            uint64_t const outcome = result.outcome;
+            if (measurement_counter == std::numeric_limits<uint64_t>::max())
+                measurement_counter_exhausted = true;
+            else
+                ++measurement_counter;
 
             for (int i = 0; i < N; ++i)
             {
