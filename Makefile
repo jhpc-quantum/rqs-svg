@@ -48,10 +48,21 @@ $(MEASUREMENT_REDUCE_TEST): tests/measurement_reduce_test.cu src/measurement_red
 test-measurement-reduce: $(MEASUREMENT_REDUCE_TEST)
 	./$(MEASUREMENT_REDUCE_TEST)
 
+# MPI_CXX must use the MPI installation linked into libqcs.
+MPI_CXX ?= mpicxx
+MEASUREMENT_INTEGRATION_TEST ?= bin/measurement_integration_test
+$(MEASUREMENT_INTEGRATION_TEST): tests/measurement_integration_test.cpp include/qcs.h $(LIBQCS_SO)
+	mkdir -p $(dir $@)
+	$(MPI_CXX) -std=c++17 $(INCLUDE) $< -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
+
+.PHONY: test-measurement-integration
+test-measurement-integration: $(MEASUREMENT_INTEGRATION_TEST)
+	./$(MEASUREMENT_INTEGRATION_TEST)
+
 .PHONY: gengetopt
 gengetopt: src/qcs_args.ggo
 	gengetopt --input=$< --unamed-opts --file-name=qcs_args --output-dir=src
 
 .PHONY: clean
 clean:
-	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST)
+	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST)

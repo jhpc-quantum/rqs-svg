@@ -247,24 +247,49 @@ All MPI ranks must invoke a measurement with the same ordered lists.  A later
 measurement observes the already selected branch; prepare the state again for
 an independent shot.
 
-Measurements use groups of up to eight qubits, with any remainder measured
-together as a smaller group. Each group containing unmeasured qubits computes
-joint probabilities with one CUB reduction per participating rank, then one MPI
-probability sum and one result broadcast. The first target is the
-least significant bit of the internal joint outcome. Already measured qubits
-retain their values, and projection remains deferred until needed by a gate or
-statevector output. Global targets use rank bits without exchanging the
-statevector.
+Measurements use groups of up to four qubits (the current maximum and default),
+with any remainder measured together as a smaller group. Each group containing
+unmeasured qubits computes joint unnormalized squared norms in double precision
+with a custom two-stage CUDA reduction. The first stage visits only states
+matching all previously measured local controls, accumulates bins in shared
+memory, and writes bin-major partial sums. The second stage reduces those
+partials into the outcome bins. The first target is the least significant bit
+of the internal joint outcome; unsorted targets and logical-to-physical mappings
+retain their caller-order output positions.
 
-The internal `measure_qubits<N>` and `IndirectLoad<N, L>` templates support
-widths 1–4, where `L` counts unmeasured local targets. `measure_group_size` in
-`src/qcs.cu` selects the production grouping width; the public C API is unchanged.
-The device result buffer grows to `sizeof(MeasureNorm<N>)` as needed, and CUB
-scratch requirements are queried for each reduction configuration. Both buffers
-are reused. Wider groups increase reduction storage exponentially and are not
-necessarily faster. Joint sampling preserves probability distributions, but
-consumes fewer random draws, so seeded results can differ from sequential
-measurement.
+Each such group uses one MPI sum over its `2^N` masses and one outcome broadcast.
+Inactive ranks contribute zeros and still join both collectives. Sampling uses
+`[0,total)` after validating every bin and the total, so normalization is not
+required. Global-only targets still reduce local norms, using rank bits for
+their outcomes without exchanging statevector amplitudes or changing the mapping.
+Already measured targets retain their recorded values; a fully recorded group
+needs no reduction, collective, or random draw. Projection remains deferred until
+needed by a gate or statevector output, while discarded branches are excluded
+from subsequent norm reductions.
+
+`measure_group_size` in `src/qcs.cu` selects widths 1–4; the public C API is
+unchanged. A simulator-owned workspace in `src/measurement_reduce.cuh` reuses
+partial and output storage, growing together as needed. It is bound to the
+simulator's device and stream, and releases storage on that stream when state
+memory is freed. Both kernels and the result download use that same stream;
+the host copy completes before MPI reads it. Wider groups increase storage
+exponentially and are not necessarily faster. Joint sampling preserves
+probability distributions, but consumes fewer random draws than sequential
+measurement, and summation order can affect seeded results.
+
+Focused reducer tests remain in `tests/measurement_reduce_test.cu`. Public API
+integration coverage in `tests/measurement_integration_test.cpp` uses nonuniform
+basis states and a biased correlated state, including unsorted classical
+assignments, repeated measurements, deferred projection, and input errors.
+Build and run on a configured CUDA/MPI machine with:
+
+```sh
+make target sharedlibrary
+make test-measurement-reduce
+make test-measurement-integration
+# One GPU per rank; also run with 4 and 8 ranks where available.
+mpirun -np 2 ./bin/measurement_integration_test
+```
 
 ## Running
 

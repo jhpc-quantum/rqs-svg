@@ -24,15 +24,13 @@
 #include <type_traits>
 #include <array>
 #include <thread>
+#include <memory>
 
 #include <mpi.h>
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <cuda/std/complex>
 #include <cuda/std/array>
-#include <cub/cub.cuh>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <nccl.h>
 #ifdef QCS_ENABLE_NVSHMEM
 #include <nvshmem.h>
@@ -975,59 +973,8 @@ namespace qcs
         gateobj.apply(s_in, s_out);
     }
 
-    namespace cubUtility
+    namespace measurement
     {
-
-        template <int N>
-        struct MeasureNormAdd
-        {
-            __host__ __device__ MeasureNorm<N> operator()(const MeasureNorm<N> &a, const MeasureNorm<N> &b) const
-            {
-                MeasureNorm<N> result{};
-                #pragma unroll
-                for (int i = 0; i < (1 << N); ++i)
-                    result[i] = a[i] + b[i];
-                return result;
-            }
-        };
-
-        // L counts only unmeasured local targets. All other output bits are
-        // fixed by either the rank or a previously recorded measurement.
-        template <int N, int L>
-        struct IndirectLoad
-        {
-            static_assert(N >= 1 && N <= max_measure_qubits);
-            static_assert(L >= 0 && L <= N);
-            cuda::std::array<int, N> local_outcome_bits;
-            uint64_t fixed_outcome;
-
-            __device__ MeasureNorm<N> operator()(uint64_t thread_num) const
-            {
-                uint64_t index_state[1 << L];
-                if constexpr (L == 0)
-                {
-                    thread_num_to_state_index_q0(thread_num, index_state[0]);
-                }
-                else
-                {
-                    int is_measured_bits, measured_value_bits;
-                    thread_num_to_state_index<L>(thread_num, index_state, is_measured_bits, measured_value_bits);
-                }
-
-                MeasureNorm<N> result{};
-                #pragma unroll
-                for (int basis = 0; basis < (1 << L); ++basis)
-                {
-                    uint64_t outcome = fixed_outcome;
-                    #pragma unroll
-                    for (int bit = 0; bit < L; ++bit)
-                        outcome |= uint64_t((basis >> bit) & 1) << local_outcome_bits[bit];
-                    result[outcome] = cuda::std::norm(kernel_common_data().state_data_device[index_state[basis]]);
-                }
-                return result;
-            }
-        };
-
         template <int N>
         qcs::float_t measure_norm_sum(const MeasureNorm<N> &norm)
         {
@@ -1062,7 +1009,7 @@ namespace qcs
             return last_positive;
         }
 
-    } /* cubUtility */
+    } /* measurement */
 
     enum class initstate_enum
     {
@@ -1213,11 +1160,7 @@ namespace qcs
         uint64_t exchange_generation = 0;
         int exchange_grid_blocks = 0;
 #endif
-        void *measure_norm_device = NULL;
-        size_t measure_norm_device_size = 0;
-
-        void *cub_temp_buffer_device;
-        size_t cub_temp_buffer_device_size;
+        std::unique_ptr<measurement_detail::workspace> measurement_workspace = nullptr;
 
         std::vector<int> operand_qubit_num_list;
         std::vector<int> target_qubit_num_physical_list;
@@ -1349,7 +1292,6 @@ namespace qcs
 
             engine = std::mt19937_64(rng_seed);
 
-            cub_temp_buffer_device = NULL;
             state_data_device = NULL;
             swap_buffer = NULL;
 
@@ -1410,9 +1352,9 @@ namespace qcs
             {
                 exmes_list.push_back(atlc::format("num_qubits is already set %d > 0", this->num_qubits));
             }
-            if (cub_temp_buffer_device)
+            if (measurement_workspace)
             {
-                exmes_list.push_back(atlc::format("cub_temp_buffer_device is %p not NULL", cub_temp_buffer_device));
+                exmes_list.push_back("measurement workspace is already allocated");
             }
             if (state_data_device)
             {
@@ -1552,16 +1494,16 @@ namespace qcs
 #endif
                 ATLC_CHECK_CUDA(cudaMallocAsync, &swap_buffer, swap_buffer_total_length * sizeof(qcs::complex_t), stream);
 
-            ATLC_CHECK_CUDA(cudaMallocAsync, &cub_temp_buffer_device, 1, stream);
-            cub_temp_buffer_device_size = 1;
+            measurement_workspace = std::make_unique<measurement_detail::workspace>(stream);
         }
 
         void free_memory()
         {
-            if (cub_temp_buffer_device)
+            if (measurement_workspace)
             {
-                ATLC_CHECK_CUDA(cudaFreeAsync, cub_temp_buffer_device, stream);
-                cub_temp_buffer_device = NULL;
+                // Queue release after every use, before releasing the state or stream.
+                measurement_workspace->close();
+                measurement_workspace.reset();
             }
 #ifdef QCS_ENABLE_NVSHMEM
             if constexpr (exchange_nvshmem_registered_put)
@@ -1590,12 +1532,6 @@ namespace qcs
             {
                 ATLC_CHECK_CUDA(cudaFreeAsync, swap_buffer, stream);
                 swap_buffer = NULL;
-            }
-            if (measure_norm_device)
-            {
-                ATLC_CHECK_CUDA(cudaFreeAsync, measure_norm_device, stream);
-                measure_norm_device = NULL;
-                measure_norm_device_size = 0;
             }
             this->num_qubits = 0;
         }
@@ -2265,51 +2201,35 @@ namespace qcs
             }
         } /* save_statevector */
 
-        template <int N, int L = N>
+        template <int N>
         MeasureNorm<N> reduce_measure_norm(
             int num_local_targets, const cuda::std::array<int, N> &local_outcome_bits,
             uint64_t fixed_outcome)
         {
-            if (num_local_targets != L)
+            measurement_detail::descriptor<N> descriptor{};
+            descriptor.local_targets = num_local_targets;
+            descriptor.fixed_outcome = fixed_outcome;
+            // Physical targets retain caller order; operand_qubit_num_list also
+            // contains targets and must not be used as the control domain.
+            for (int i = 0; i < num_local_targets; ++i)
             {
-                if constexpr (L > 0)
-                    return reduce_measure_norm<N, L - 1>(num_local_targets, local_outcome_bits, fixed_outcome);
-                throw std::runtime_error("invalid local measurement target count");
+                descriptor.local_target_physical[i] = target_qubit_num_physical_list[i];
+                descriptor.local_outcome_bits[i] = local_outcome_bits[i];
             }
-
-            cubUtility::IndirectLoad<N, L> loader{local_outcome_bits, fixed_outcome};
-            using CountingIter = thrust::counting_iterator<uint64_t>;
-            using TransformIter = thrust::transform_iterator<decltype(loader), CountingIter>;
-            TransformIter in_it(CountingIter(0), loader);
-
-            if (measure_norm_device_size < sizeof(MeasureNorm<N>))
+            for (int physical : positive_control_qubit_num_physical_local_list)
             {
-                if (measure_norm_device)
-                    ATLC_CHECK_CUDA(cudaFreeAsync, measure_norm_device, stream);
-                measure_norm_device = NULL;
-                measure_norm_device_size = 0;
-                ATLC_CHECK_CUDA(cudaMallocAsync, &measure_norm_device, sizeof(MeasureNorm<N>), stream);
-                measure_norm_device_size = sizeof(MeasureNorm<N>);
+                descriptor.control_mask |= UINT64_C(1) << physical;
+                descriptor.control_value |= UINT64_C(1) << physical;
             }
-            auto output = static_cast<MeasureNorm<N> *>(measure_norm_device);
-            cubUtility::MeasureNormAdd<N> add;
-            MeasureNorm<N> zero{};
-            size_t temp_sz_required = 0;
-            uint64_t const count = num_states_local >> num_operand_qubits;
-            // CUB requirements depend on N, L and the number of active states.
-            ATLC_CHECK_CUDA(cub::DeviceReduce::Reduce, NULL, temp_sz_required, in_it, output, count, add, zero, stream);
-            if (cub_temp_buffer_device_size < temp_sz_required)
-            {
-                ATLC_CHECK_CUDA(cudaFreeAsync, cub_temp_buffer_device, stream);
-                cub_temp_buffer_device = NULL;
-                cub_temp_buffer_device_size = 0;
-                ATLC_CHECK_CUDA(cudaMallocAsync, &cub_temp_buffer_device, temp_sz_required, stream);
-                cub_temp_buffer_device_size = temp_sz_required;
-            }
-            ATLC_CHECK_CUDA(cub::DeviceReduce::Reduce, cub_temp_buffer_device, cub_temp_buffer_device_size, in_it, output, count, add, zero, stream);
+            for (int physical : negative_control_qubit_num_physical_local_list)
+                descriptor.control_mask |= UINT64_C(1) << physical;
 
+            auto output = measurement_workspace->enqueue<N>(
+                state_data_device, num_states_local, descriptor, stream);
             MeasureNorm<N> norm{};
-            ATLC_CHECK_CUDA(cudaMemcpyAsync, &norm, output, sizeof(MeasureNorm<N>), cudaMemcpyDeviceToHost, stream);
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, norm.data(), output, sizeof(MeasureNorm<N>), cudaMemcpyDeviceToHost, stream);
+            // MPI must only see completed host results. This is the existing
+            // measurement boundary; no device-wide synchronization is needed.
             ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
             return norm;
         }
@@ -2371,12 +2291,12 @@ namespace qcs
             static_assert(std::is_same<qcs::float_t, double>::value, "measurement MPI type must match float_t");
             ATLC_CHECK_MPI(MPI_Allreduce, local_norm.data(), global_norm.data(), 1 << N, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
             // Validate on every rank before the broadcast, including each bin.
-            qcs::float_t const total = cubUtility::measure_norm_sum<N>(global_norm);
+            qcs::float_t const total = measurement::measure_norm_sum<N>(global_norm);
             uint64_t outcome = 0;
             if (proc_num == 0)
             {
                 std::uniform_real_distribution<qcs::float_t> distribution(0, total);
-                outcome = cubUtility::select_measure_outcome<N>(global_norm, distribution(engine));
+                outcome = measurement::select_measure_outcome<N>(global_norm, distribution(engine));
             }
             ATLC_CHECK_MPI(MPI_Bcast, &outcome, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
