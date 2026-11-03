@@ -47,6 +47,7 @@ int main(int argc, char** argv)
         const int repetitions = argc > 3 ? std::stoi(argv[3]) : 30;
         if (local_bits < 2 || local_bits > 20 || !cap || repetitions <= 0)
             throw std::runtime_error("arguments: local_bits [2,20], slot-total cap > 0, repetitions > 0");
+        c.profile_graph_first_launch = true;
         const int bits = local_bits + c.log_num_procs;
         qcs_simulator_set_num_qubits_cxx(sim, bits);
         for (int cycle = 0; cycle < 3; ++cycle)
@@ -72,37 +73,70 @@ int main(int argc, char** argv)
                 initial.size() * sizeof(initial[0]), cudaMemcpyHostToDevice, c.stream);
             // Force the same physical exchange, twice restores the state. Low=0
             // exercises one-element regions; low=local_bits-1 exercises tails.
-            for (int low : {0, local_bits - 1})
+            for (int global = local_bits; global < bits; ++global)
+            for (int low : {0, local_bits - 1, 1, local_bits - 1})
             {
                 c.swap_target_local_list = {low};
-                c.swap_target_global_list = {local_bits};
+                c.swap_target_global_list = {global};
                 c.exchange_qubits();
                 auto before = reference;
                 for (uint64_t i = 0; i < reference.size(); ++i)
                 {
                     uint64_t j = i;
-                    if (((i >> low) ^ (i >> local_bits)) & 1)
-                        j ^= (UINT64_C(1) << low) | (UINT64_C(1) << local_bits);
+                    if (((i >> low) ^ (i >> global)) & 1)
+                        j ^= (UINT64_C(1) << low) | (UINT64_C(1) << global);
                     reference[i] = before[j];
                 }
                 check(c, reference);
-                c.exchange_qubits();
+                // Replay repeatedly; every pair restores the original state.
+                for (int replay = 0; replay < 7; ++replay)
+                {
+                    c.exchange_qubits();
+                    if (!(replay & 1)) check(c, before);
+                    else check(c, reference);
+                }
                 reference = before;
+            }
+            // Change capacity within the allocated region to invalidate offsets
+            // and lengths, then restore it. Oracle state is unchanged after pairs.
+            uint64_t saved_cap = c.swap_buffer_total_length;
+            for (uint64_t changed : {UINT64_C(1), saved_cap})
+            {
+                c.swap_buffer_total_length = changed;
+                c.exchange_qubits();
+                c.exchange_qubits();
                 check(c, reference);
             }
+            c.reinitialize_mapping();
+            check(c, reference);
             // Local and global gates exercise the normal mapping path.
-            for (bit_num_t target : {bit_num_t(0), bit_num_t(bits - 1), bit_num_t(1)})
+            for (int round = 0; round < 2; ++round)
             {
-                qcs_simulator_gate_h_cxx(sim, &target, 1, nullptr, 0, nullptr, 0);
-                uint64_t mask = UINT64_C(1) << target;
-                for (uint64_t i = 0; i < reference.size(); ++i)
-                    if (!(i & mask))
-                    {
-                        value a = reference[i], b = reference[i | mask];
-                        reference[i] = (a + b) / std::sqrt(2.0);
-                        reference[i | mask] = (a - b) / std::sqrt(2.0);
-                    }
-                check(c, reference);
+                if (round)
+                {
+                    // Mapping reset is bookkeeping, not a physical permutation.
+                    // Reload the original physical state and reset the oracle too.
+                    finish(c);
+                    c.reinitialize_mapping();
+                    ATLC_CHECK_CUDA(cudaMemcpyAsync, c.state_data_device, initial.data(),
+                        initial.size() * sizeof(initial[0]), cudaMemcpyHostToDevice, c.stream);
+                    for (uint64_t i = 0; i < reference.size(); ++i)
+                        reference[i] = value(double((i * 17) % 101) / 101, double((i * 13) % 97) / 97);
+                    check(c, reference);
+                }
+                for (bit_num_t target : {bit_num_t(0), bit_num_t(bits - 1), bit_num_t(1)})
+                {
+                    qcs_simulator_gate_h_cxx(sim, &target, 1, nullptr, 0, nullptr, 0);
+                    uint64_t mask = UINT64_C(1) << target;
+                    for (uint64_t i = 0; i < reference.size(); ++i)
+                        if (!(i & mask))
+                        {
+                            value a = reference[i], b = reference[i | mask];
+                            reference[i] = (a + b) / std::sqrt(2.0);
+                            reference[i | mask] = (a - b) / std::sqrt(2.0);
+                        }
+                    check(c, reference);
+                }
             }
             c.swap_target_local_list = {local_bits - 1};
             c.swap_target_global_list = {local_bits};
@@ -113,8 +147,15 @@ int main(int argc, char** argv)
             for (int rep = 0; rep < repetitions; ++rep) c.exchange_qubits();
             finish(c); // Includes copy-back on the independent stream.
             double elapsed = maximum(MPI_Wtime() - begin);
-            if (!c.proc_num) printf("mode=%d cycle=%d initialization_s=%.9f allocation_s=%.9f registration_s=%.9f exchange_s=%.9f repetitions=%d cap=%llu\n",
-                qcs::nccl_buffer_mode, cycle, initialization, allocation, registration, elapsed / repetitions, repetitions,
+            double setup = maximum(c.exchange_graph_setup_seconds);
+            double capture = maximum(c.exchange_capture_seconds);
+            double instantiate = maximum(c.exchange_instantiate_seconds);
+            double first = maximum(c.exchange_first_launch_seconds);
+            if (!c.proc_num) printf("mode=%d graph=%d cycle=%d initialization_s=%.9f allocation_s=%.9f registration_s=%.9f graph_setup_s=%.9f capture_s=%.9f instantiate_s=%.9f first_launch_s=%.9f exchange_s=%.9f builds=%llu replays=%llu repetitions=%d cap=%llu\n",
+                qcs::nccl_buffer_mode, qcs::nccl_graph_mode, cycle, initialization, allocation, registration,
+                setup, capture, instantiate, first, elapsed / repetitions,
+                static_cast<unsigned long long>(c.exchange_graph_builds),
+                static_cast<unsigned long long>(c.exchange_graph_replays), repetitions,
                 static_cast<unsigned long long>(c.swap_buffer_total_length));
             c.free_memory();
         }

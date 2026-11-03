@@ -6,7 +6,9 @@ INCLUDE ?= -I./include
 NVCC_CFLAGS = $(CFLAGS_VENDOR) -Wformat=2 $(INCLUDE) -O3 -rdynamic -std=c++17 -Wno-deprecated-gpu-targets $(GENCODE_FLAGS)
 # 0 = baseline, 1 = ncclMemAlloc only, 2 = ncclMemAlloc + ncclCommRegister.
 NCCL_BUFFER_MODE ?= 0
-NVCC_CFLAGS += -DQCS_NCCL_BUFFER_MODE=$(NCCL_BUFFER_MODE)
+# 0 = streams; 1 = graphs without graph registration; 2 = graph-managed registration.
+NCCL_GRAPH_MODE ?= 0
+NVCC_CFLAGS += -DQCS_NCCL_BUFFER_MODE=$(NCCL_BUFFER_MODE) -DQCS_NCCL_GRAPH_MODE=$(NCCL_GRAPH_MODE)
 NVCC_LDFLAGS = $(LDFLAGS_VENDOR) -L./lib $(LDLIBS) --cudart=shared
 # Set NVSHMEM=1 to enable NVSHMEM registered-PUT exchange.
 # NVSHMEM_HOME must point to an installation built with MPI support.
@@ -124,7 +126,7 @@ test-measurement-metadata: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_te
 	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) regression 12
 
 # Build only; run explicitly under the target cluster's MPI launcher.
-NCCL_BUFFER_HARNESS ?= bin/nccl-buffer-$(NCCL_BUFFER_MODE)
+NCCL_BUFFER_HARNESS ?= bin/nccl-buffer-$(NCCL_BUFFER_MODE)-graph-$(NCCL_GRAPH_MODE)
 $(NCCL_BUFFER_HARNESS): tests/nccl_buffer_harness.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)

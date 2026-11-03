@@ -8,9 +8,19 @@
 #define QCS_NCCL_BUFFER_MODE 0
 #endif
 
+#ifndef QCS_NCCL_GRAPH_MODE
+#define QCS_NCCL_GRAPH_MODE 0
+#endif
+
 namespace qcs {
+// 0: streams; 1: graphs with graph registration disabled; 2: graph-managed registration.
+constexpr int nccl_graph_mode = QCS_NCCL_GRAPH_MODE;
+static_assert(nccl_graph_mode >= 0 && nccl_graph_mode <= 2, "invalid NCCL graph mode");
+
 // 0: original CUDA allocation; 1: NCCL allocation; 2: allocation + registration.
 constexpr int nccl_buffer_mode = QCS_NCCL_BUFFER_MODE;
+static_assert(nccl_graph_mode != 2 || nccl_buffer_mode == 1,
+              "graph-managed registration requires NCCL_BUFFER_MODE=1");
 static_assert(nccl_buffer_mode >= 0 && nccl_buffer_mode <= 2, "invalid NCCL buffer mode");
 inline void check_buffer_nccl(ncclResult_t result, const char* operation)
 {

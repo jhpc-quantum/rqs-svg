@@ -1,5 +1,8 @@
 # Explicit NCCL buffer registration
 
+For the optional graph modes and their separate registration controls, see
+[CUDA Graph experiments](nccl-cuda-graphs.md).
+
 Build-time `NCCL_BUFFER_MODE` selects the experiment (default `0`):
 
 | Mode | State and scratch allocations | Explicit registration |
@@ -68,7 +71,7 @@ export NCCL_DEBUG_SUBSYS=INIT,REG,NET
 export NCCL_DEBUG_FILE='/tmp/nccl.%h.%p.log'
 for mode in 0 1 2; do
   mpiexec -n 64 --map-by ppr:4:node --bind-to core \
-    ./bin/nccl-buffer-"$mode" 10 6 30
+    ./bin/nccl-buffer-"$mode"-graph-0 10 6 30
 done
 ```
 
@@ -98,7 +101,7 @@ Boundary and lifecycle commands (run for all modes and at 2, 4, and 64 ranks):
 for mode in 0 1 2; do
   for cap in 1 2 6 512; do
     mpiexec -n 4 --map-by ppr:4:node --bind-to core \
-      ./bin/nccl-buffer-"$mode" 10 "$cap" 30
+      ./bin/nccl-buffer-"$mode"-graph-0 10 "$cap" 30
   done
 done
 ```

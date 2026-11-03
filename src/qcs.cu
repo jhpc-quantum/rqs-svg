@@ -1080,6 +1080,17 @@ namespace qcs
         double allocation_seconds = 0;
         double registration_seconds = 0;
         int nccl_rank;
+        // One entry bounds retained schedules. Destroy before any allocation/comm changes.
+        cudaGraph_t exchange_graph{};
+        cudaGraphExec_t exchange_graph_exec{};
+        std::vector<uint64_t> exchange_graph_key;
+        double exchange_graph_setup_seconds = 0;
+        double exchange_capture_seconds = 0;
+        double exchange_instantiate_seconds = 0;
+        double exchange_first_launch_seconds = 0;
+        bool profile_graph_first_launch = false; // Harness only; normal execution stays asynchronous.
+        uint64_t exchange_graph_builds = 0;
+        uint64_t exchange_graph_replays = 0;
 
         std::vector<int> perm_p2l;
         std::vector<int> perm_l2p;
@@ -1211,6 +1222,33 @@ namespace qcs
             ATLC_CHECK_MPI(MPI_Allreduce, &supported, &all_supported, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             if (!all_supported) throw std::runtime_error(
                 "NCCL buffer modes 1/2 require NCCL >= 2.31.2 and NCCL exchange; mode 2 requires NCCL_PXN_DISABLE=1 on every rank");
+
+            int graph_mode = nccl_graph_mode, min_graph = 0, max_graph = 0;
+            ATLC_CHECK_MPI(MPI_Allreduce, &graph_mode, &min_graph, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            ATLC_CHECK_MPI(MPI_Allreduce, &graph_mode, &max_graph, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            if (min_graph != max_graph) throw std::runtime_error("NCCL graph mode differs across ranks");
+            if (nccl_graph_mode)
+            {
+                // Require explicit environment controls, before NCCL caches parameters.
+                auto env_is = [](const char* name, const char* value) {
+                    const char* actual = std::getenv(name);
+                    return actual && std::string(actual) == value;
+                };
+                int valid = !exchange_nvshmem_registered_put && NCCL_VERSION_CODE >= 23102 &&
+                    version >= 23102 && env_is("NCCL_GRAPH_REGISTER", nccl_graph_mode == 2 ? "1" : "0") &&
+                    env_is("NCCL_LOCAL_REGISTER", nccl_buffer_mode == 2 ? "1" : "0") &&
+                    env_is("NCCL_PXN_DISABLE", "1") && env_is("NCCL_GRAPH_STREAM_ORDERING", "1") &&
+                    env_is("NCCL_GRAPH_MIXING_SUPPORT", "1") && env_is("NCCL_RUNTIME_CONNECT", "0");
+                if (nccl_graph_mode == 2) valid &= NCCL_VERSION_CODE == 23102 && version == 23102;
+                int all_valid = 0;
+                ATLC_CHECK_MPI(MPI_Allreduce, &valid, &all_valid, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                if (!all_valid) throw std::runtime_error(
+                    "graph modes require NCCL >= 2.31.2, NVSHMEM=0, NCCL_PXN_DISABLE=1, "
+                    "NCCL_GRAPH_STREAM_ORDERING=1, NCCL_GRAPH_MIXING_SUPPORT=1, NCCL_RUNTIME_CONNECT=0, "
+                    "NCCL_GRAPH_REGISTER=(graph mode 2: 1, otherwise: 0), "
+                    "NCCL_LOCAL_REGISTER=(buffer mode 2: 1, otherwise: 0); "
+                    "graph mode 2 is audited only for NCCL 2.31.2");
+            }
 
             atlc::group_by_hostname(proc_num, num_procs, my_hostname, my_node_number, my_node_local_rank, node_count);
             // fprintf(stderr, "[debug] Rank %d on host %s -> assigned node number: %d, local node rank: %d (total nodes: %d)\n", proc_num, my_hostname.c_str(), my_node_number, my_node_local_rank, node_count);
@@ -1349,8 +1387,8 @@ namespace qcs
             std::string error;
             try
             {
-                if (nccl_buffer_mode && use_unified_memory)
-                    throw std::runtime_error("NCCL buffer modes 1/2 do not support managed memory");
+                if ((nccl_buffer_mode || nccl_graph_mode) && use_unified_memory)
+                    throw std::runtime_error("NCCL buffer/graph modes do not support managed memory");
                 double start = MPI_Wtime();
                 allocate_memory_impl(num_qubits, selected_state);
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
@@ -1374,7 +1412,7 @@ namespace qcs
                 free_memory();
                 throw std::runtime_error("NCCL buffer initialization failed on at least one rank; see rank diagnostics");
             }
-            if (nccl_buffer_mode != 0)
+            if (nccl_buffer_mode != 0 || nccl_graph_mode)
             {
                 // Free-memory differences must not produce different chunk boundaries.
                 int common_log = 0;
@@ -1563,6 +1601,7 @@ namespace qcs
             ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
             if constexpr (exchange_pipeline_copy_back && !exchange_nvshmem_registered_put)
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
+            clear_exchange_graph();
             deregister_nccl_buffer(nccl_comm, scratch_registration);
             deregister_nccl_buffer(nccl_comm, state_registration);
             if (measurement_workspace)
@@ -1882,7 +1921,144 @@ namespace qcs
         }
 #endif
 
+        void clear_exchange_graph()
+        {
+            if (!exchange_graph && !exchange_graph_exec) return;
+            // NCCL graph cleanup can reference the communicator and registrations.
+            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            if (exchange_copy_stream) ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
+            if (exchange_graph_exec)
+            {
+                ATLC_CHECK_CUDA(cudaGraphExecDestroy, exchange_graph_exec);
+                exchange_graph_exec = nullptr;
+            }
+            if (exchange_graph)
+            {
+                ATLC_CHECK_CUDA(cudaGraphDestroy, exchange_graph);
+                exchange_graph = nullptr;
+            }
+            exchange_graph_key.clear();
+        }
+
+        void exchange_qubits_graph()
+        {
+            bool capturing = false;
+            try
+            {
+                // Every rank must enter exchange calls in the same host order.
+                // Even a rank with no swaps participates before any early return.
+                int count = int(swap_target_global_list.size()), low = 0, high = 0;
+                ATLC_CHECK_MPI(MPI_Allreduce, &count, &low, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                ATLC_CHECK_MPI(MPI_Allreduce, &count, &high, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+                if (low != high) throw std::runtime_error("graph exchange swap counts differ across ranks");
+                if (!count) return;
+                if (count > num_qubits_local || count > log_num_procs ||
+                    swap_target_local_list.size() != size_t(count) || !swap_buffer_total_length)
+                    throw std::runtime_error("invalid graph exchange schedule");
+                std::vector<int> schedule{num_qubits_local, int(exchange_pipeline_copy_back)};
+                schedule.insert(schedule.end(), swap_target_global_list.begin(), swap_target_global_list.end());
+                schedule.insert(schedule.end(), swap_target_local_list.begin(), swap_target_local_list.end());
+                for (int i = 0; i < count; ++i)
+                    if (swap_target_local_list[i] < 0 || swap_target_local_list[i] >= num_qubits_local ||
+                        swap_target_global_list[i] < num_qubits_local || swap_target_global_list[i] >= num_qubits)
+                        throw std::runtime_error("invalid graph exchange qubit");
+                // These values uniquely determine the ordered peers, offsets, counts,
+                // NCCL datatype/group ordering, slot reuse, and copy dependencies in
+                // exchange_qubits_enqueue. A lifetime change clears the entry first.
+                std::vector<uint64_t> key{
+                    reinterpret_cast<uintptr_t>(nccl_comm), reinterpret_cast<uintptr_t>(state_data_device),
+                    reinterpret_cast<uintptr_t>(scratch.data()), uint64_t(scratch.size()),
+                    reinterpret_cast<uintptr_t>(swap_buffer), swap_buffer_total_length,
+                    num_states_local, uint64_t(proc_num), uint64_t(num_procs),
+                    reinterpret_cast<uintptr_t>(stream), reinterpret_cast<uintptr_t>(exchange_copy_stream),
+                    uint64_t(nccl_buffer_mode), uint64_t(nccl_graph_mode)};
+                for (int v : schedule) key.push_back(uint64_t(v));
+                int hit = exchange_graph_exec && key == exchange_graph_key, all_hit = 0;
+                ATLC_CHECK_MPI(MPI_Allreduce, &hit, &all_hit, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                if (!all_hit)
+                {
+                    double setup_start = MPI_Wtime();
+                    // A local hit cannot replay when another rank needs a capture.
+                    auto common = schedule;
+                    ATLC_CHECK_MPI(MPI_Bcast, common.data(), int(common.size()), MPI_INT, 0, MPI_COMM_WORLD);
+                    if (schedule != common) throw std::runtime_error("graph exchange schedules differ across ranks");
+                    uint64_t min_capacity = 0, max_capacity = 0;
+                    ATLC_CHECK_MPI(MPI_Allreduce, &swap_buffer_total_length, &min_capacity, 1,
+                                   MPI_UINT64_T, MPI_MIN, MPI_COMM_WORLD);
+                    ATLC_CHECK_MPI(MPI_Allreduce, &swap_buffer_total_length, &max_capacity, 1,
+                                   MPI_UINT64_T, MPI_MAX, MPI_COMM_WORLD);
+                    if (min_capacity != max_capacity) throw std::runtime_error("graph slot capacities differ across ranks");
+                    int b = *std::min_element(swap_target_local_list.begin(), swap_target_local_list.end());
+                    uint64_t area = UINT64_C(1) << b;
+                    uint64_t slot = exchange_pipeline_copy_back && swap_buffer_total_length >= 2 ?
+                        swap_buffer_total_length / 2 : swap_buffer_total_length;
+                    uint64_t chunk = std::min(area, slot);
+                    uint64_t chunks_per_area = (area - 1) / chunk + 1;
+                    uint64_t areas = UINT64_C(1) << (num_qubits_local - b);
+                    // Conservative bound includes self areas. Limits retained graph size
+                    // as well as entry count, before capture allocates graph nodes.
+                    if (areas > 32768 / chunks_per_area)
+                        throw std::runtime_error("graph exchange exceeds 32768 scheduled chunks; increase slot capacity or use graph mode 0");
+                    clear_exchange_graph();
+                    ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                    if (exchange_copy_stream) ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
+                    exchange_graph_setup_seconds = MPI_Wtime() - setup_start;
+                    double start = MPI_Wtime();
+                    ATLC_CHECK_CUDA(cudaStreamBeginCapture, stream, cudaStreamCaptureModeThreadLocal);
+                    capturing = true;
+                    // No allocation, host synchronization, or mapping mutation here.
+                    // The first transfer event forks the copy stream; the final
+                    // copy-done wait joins it back to the origin stream.
+                    exchange_qubits_enqueue();
+                    cudaError_t ended = cudaStreamEndCapture(stream, &exchange_graph);
+                    capturing = false;
+                    if (ended != cudaSuccess) throw std::runtime_error(cudaGetErrorString(ended));
+                    exchange_capture_seconds = MPI_Wtime() - start;
+                    start = MPI_Wtime();
+                    ATLC_CHECK_CUDA(cudaGraphInstantiate, &exchange_graph_exec, exchange_graph, nullptr, nullptr, 0);
+                    exchange_instantiate_seconds = MPI_Wtime() - start;
+                    exchange_graph_key = std::move(key);
+                    ++exchange_graph_builds;
+                    // No rank may launch before all ranks instantiate successfully.
+                    ATLC_CHECK_MPI(MPI_Barrier, MPI_COMM_WORLD);
+                }
+                double start = profile_graph_first_launch && !all_hit ? MPI_Wtime() : 0;
+                ATLC_CHECK_CUDA(cudaGraphLaunch, exchange_graph_exec, stream);
+                if (profile_graph_first_launch && !all_hit)
+                {
+                    ATLC_CHECK_CUDA(cudaStreamSynchronize, stream); // Includes joined copy-back.
+                    exchange_first_launch_seconds = MPI_Wtime() - start;
+                }
+                if (all_hit) ++exchange_graph_replays;
+            }
+            catch (const std::exception& e)
+            {
+                if (capturing)
+                {
+                    cudaGraph_t abandoned{};
+                    cudaStreamEndCapture(stream, &abandoned);
+                    if (abandoned) cudaGraphDestroy(abandoned);
+                }
+                fprintf(stderr, "[error] rank %d graph exchange: %s\n", proc_num, e.what());
+                // Capture/launch errors may leave peers blocked inside NCCL. A local
+                // fallback or throwing to a caller that continues would be unsafe.
+                MPI_Abort(MPI_COMM_WORLD, 1);
+                throw;
+            }
+        }
+
         void exchange_qubits()
+        {
+            if constexpr (nccl_graph_mode != 0)
+            {
+                exchange_qubits_graph();
+                return;
+            }
+            exchange_qubits_enqueue();
+        }
+
+        // Enqueues device work only. All host mapping updates remain in the caller.
+        void exchange_qubits_enqueue()
         {
             int const num_swap_qubits = swap_target_global_list.size();
             if (num_swap_qubits == 0)
