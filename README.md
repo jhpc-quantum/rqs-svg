@@ -66,7 +66,7 @@ qubit. Use deterministic measurements so the two runs select the same branch.
 
 ### Device work buffer
 
-After allocating and initializing the state vector, the simulator queries the
+After allocating the state-vector storage, the simulator queries the
 remaining GPU memory and allocates `floor(free_bytes * 95 / 100)` bytes as one
 work buffer. Measurement partials, output bins and sampler scratch use a fixed
 slice sized for every supported group width (1 through 4). The NCCL swap buffer
@@ -340,8 +340,9 @@ mpirun -np (NUM_GPUS) ./bin/qcs --output-statevector data.bin user_circuit.so
 
 Use `bin/qcs --initial-state flat --num-samples 10 circuit.so` to select
 `zero` (the default), `flat`, `entangled`, `sequential`, `use_curand`, or
-`load_statevector`. Allocation and every subsequent sample reset use the same
-initializer. Existing amplitudes and normalization behavior are preserved.
+`load_statevector`. Explicit initialization after allocation and every subsequent
+sample reset use the same initializer. Existing amplitudes and normalization
+behavior are preserved.
 `use_curand` reuses the existing seed on each reset, regenerating the same initial
 vector while measurement sampling continues to advance its own RNG cursor.
 `load_statevector` calls the existing `initialize_laod_statevector()` and rereads
@@ -349,11 +350,24 @@ vector while measurement sampling continues to advance its own RNG cursor.
 existing per-rank physical slice layout.
 
 The original C function `qcs_simulator_allocate_memory(sim)` and its ABI remain
-available and select zero. C callers can select another method with
+available and select zero, but allocation leaves state-vector contents
+uninitialized and does not zero-fill them. Initialize explicitly before gates,
+measurements, or saving the vector:
+
+```c
+qcs_simulator_allocate_memory(sim);
+qcs_simulator_set_zero_state(sim);
+```
+
+C callers can select another method with
 `qcs_simulator_allocate_memory_with_initial_state(sim, QCS_INITIAL_STATE_FLAT)`;
 C++ callers can also use `qcs_simulator_allocate_memory(sim, QCS_INITIAL_STATE_FLAT)`.
 The throwing C++ API has the corresponding two-argument
-`qcs_simulator_allocate_memory_cxx` overload. Invalid enum values throw through
+`qcs_simulator_allocate_memory_cxx` overload. These variants also only allocate
+storage and remember the method; call `qcs_simulator_set_zero_state` (or
+`qcs_simulator_set_zero_state_cxx` for the throwing API) to run it explicitly.
+In particular, allocation with `load_statevector` does not read the input file.
+Invalid enum values throw through
 the C++ API and return failure through the C API's existing exception callback.
 The legacy `qcs_simulator_set_zero_state` name now restores the selected method.
 It discards measurement metadata; callers still reset the mapping and classical
@@ -361,8 +375,8 @@ bits separately. Explicit flat/sequential/entangled/random setters retain their
 existing behavior and do not change the method remembered at allocation.
 
 `make test-initial-state` builds and runs single-GPU regression coverage for all
-six methods, invalid enum rejection, legacy default allocation, and restoration
-after repeated measurements. Run it with one MPI rank on a CUDA/MPI/NCCL system.
+six methods, deferred file loading, invalid enum rejection, explicit initialization
+after legacy default allocation, and restoration after repeated measurements. Run it with one MPI rank on a CUDA/MPI/NCCL system.
 
 
 ## Acknowledgments

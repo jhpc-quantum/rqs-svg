@@ -249,6 +249,7 @@ int main(int argc, char** argv) {
         for (int p = 0; p < qubits; ++p) mapping[p] = qubits - p - 1;
         qcs_simulator_set_mapping_cxx(sim, mapping.data(), qubits);
         qcs_simulator_allocate_memory_cxx(sim);
+        qcs_simulator_set_zero_state_cxx(sim);
         if (bench) benchmark(sim, warmups, repetitions);
         else {
 #if MEASUREMENT_GPU_SAMPLING

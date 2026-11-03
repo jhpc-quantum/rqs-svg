@@ -51,11 +51,21 @@ int main()
         };
         for (auto method : methods)
         {
+            // Allocation must not invoke the file loader, even when selected.
+            // Do not inspect unspecified allocation contents to test this contract.
+            if (method == QCS_INITIAL_STATE_LOAD_STATEVECTOR)
+                require_initial_state(rename("statevector_input.bin", "deferred.bin") == 0,
+                                      "fixture rename failed");
             // Exercise the original C symbol as well as the explicit C entry point.
             require_initial_state(method == QCS_INITIAL_STATE_ZERO
                 ? qcs_simulator_allocate_memory(sim)
                 : qcs_simulator_allocate_memory_with_initial_state(sim, method),
                 "allocation failed");
+            if (method == QCS_INITIAL_STATE_LOAD_STATEVECTOR)
+                require_initial_state(rename("deferred.bin", "statevector_input.bin") == 0,
+                                      "fixture restore failed");
+            require_initial_state(qcs_simulator_set_zero_state(sim),
+                                  "explicit initialization failed");
             const auto initial = snapshot(sim);
             bool nonzero = false;
             for (int i = 0; i < count; ++i)

@@ -96,6 +96,7 @@ int main(int argc, char **argv)
     qcs_simulator_set_num_qubits(sim, num_qubits);
     qcs_simulator_set_num_clbits(sim, num_clbits);
     qcs_simulator_allocate_memory(sim);
+    qcs_simulator_set_zero_state(sim);
 
     bit_t event_1 = 0;
     bit_t event_2 = 0;

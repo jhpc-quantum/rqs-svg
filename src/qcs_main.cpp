@@ -175,6 +175,10 @@ int main(int argc, char **argv)
     {
         throw std::runtime_error("qcs_simulator_allocate_memory failed");
     }
+    if (!qcs_simulator_set_zero_state(sim.get()))
+    {
+        throw std::runtime_error("state initialization failed");
+    }
 
     bit_t event_1 = 0;
     bit_t event_2 = 0;

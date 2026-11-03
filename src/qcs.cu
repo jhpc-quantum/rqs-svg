@@ -1383,7 +1383,7 @@ namespace qcs
             {
                 ATLC_CHECK_CUDA(cudaMallocAsync, &state_data_device, num_states_local * sizeof(*state_data_device), stream);
             }
-            initialize_selected_state();
+            // State-vector contents remain uninitialized until an explicit setter.
 
             qcs_kernel_common_host.num_qubits = num_qubits;
             qcs_kernel_common_host.state_data_device = state_data_device;
@@ -2381,6 +2381,7 @@ namespace qcs
 void GHZ_circuit_sample() {
 
     allocate_memory(14);
+    initialize_selected_state();
 
     uint64_t measured_bit = 0;
 
