@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <cstdio>
+#include <cerrno>
+#include <cstring>
 #include <unistd.h>
 #include <dlfcn.h>
 
@@ -103,14 +105,20 @@ int main(int argc, char **argv)
     char const *const usercircuit_so_abspath = realpath(usercircuit_so_path.c_str(), NULL);
     if (usercircuit_so_abspath == NULL)
     {
-        throw std::runtime_error("realpath returned NULL");
+        int const error = errno;
+        if (error == ENOENT || error == ENOTDIR)
+        {
+            throw std::runtime_error(atlc::format("Circuit binary not found: '%s'", usercircuit_so_path.c_str()));
+        }
+        throw std::runtime_error(atlc::format("Failed to load circuit binary '%s': %s", usercircuit_so_path.c_str(), std::strerror(error)));
     }
     std::unique_ptr<char, void (*)(void *)> usercircuit_so_abspath_cleanup((char *)usercircuit_so_abspath, free);
 
     void *usercircuit_dl = dlopen(usercircuit_so_abspath, RTLD_LAZY);
     if (usercircuit_dl == NULL)
     {
-        throw std::runtime_error("dlopen failed");
+        char const *const error = dlerror();
+        throw std::runtime_error(atlc::format("Failed to load circuit binary '%s': %s", usercircuit_so_path.c_str(), error));
     }
     std::unique_ptr<void, int (*)(void *)> usercircuit_dl_cleanup(usercircuit_dl, dlclose);
 
