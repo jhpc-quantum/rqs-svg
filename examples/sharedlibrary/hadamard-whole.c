@@ -139,6 +139,7 @@ int main(int argc, char **argv)
 
         if (sample_num != num_samples - 1)
         {
+            qcs_simulator_reinitialize_mapping(sim);
             qcs_simulator_set_zero_state(sim);
             qcs_simulator_reset_clbits(sim);
         }
