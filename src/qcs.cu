@@ -1524,17 +1524,18 @@ namespace qcs
             {
                 qcs::complex_t const one = 1;
                 ATLC_CHECK_CUDA(cudaMemcpyAsync, state_data_device, &one, sizeof(qcs::complex_t), cudaMemcpyHostToDevice, stream);
-                ATLC_CHECK_CUDA(cudaMemset, state_data_device + 1, 0, sizeof(qcs::complex_t) * (num_states_local - 1));
+                ATLC_CHECK_CUDA(cudaMemsetAsync, state_data_device + 1, 0, sizeof(qcs::complex_t) * (num_states_local - 1), stream);
             }
             else
             {
-                ATLC_CHECK_CUDA(cudaMemset, state_data_device, 0, sizeof(qcs::complex_t) * num_states_local);
+                ATLC_CHECK_CUDA(cudaMemsetAsync, state_data_device, 0, sizeof(qcs::complex_t) * num_states_local, stream);
             }
         }
 
         void initialize_entangled()
         {
             discard_measurement_state();
+            ATLC_CHECK_CUDA(cudaMemsetAsync, state_data_device, 0, sizeof(qcs::complex_t) * num_states_local, stream);
             if (proc_num == 0)
             {
                 qcs::complex_t const one = 1;
