@@ -1074,7 +1074,11 @@ namespace qcs
         int gpu_id;
 
         ncclUniqueId nccl_id;
-        ncclComm_t nccl_comm;
+        ncclComm_t nccl_comm = nullptr;
+        void* state_registration = nullptr;
+        void* scratch_registration = nullptr;
+        double allocation_seconds = 0;
+        double registration_seconds = 0;
         int nccl_rank;
 
         std::vector<int> perm_p2l;
@@ -1097,10 +1101,10 @@ namespace qcs
         int target_qubit_num_begin;
         int target_qubit_num_end;
 
-        cudaStream_t stream;
-        cudaStream_t exchange_copy_stream;
-        cudaEvent_t exchange_transfer_done[2];
-        cudaEvent_t exchange_copy_done[2];
+        cudaStream_t stream{};
+        cudaStream_t exchange_copy_stream{};
+        cudaEvent_t exchange_transfer_done[2]{};
+        cudaEvent_t exchange_copy_done[2]{};
         std::vector<cudaEvent_t> event_list;
 
         uint64_t num_states;
@@ -1111,7 +1115,7 @@ namespace qcs
         uint64_t block_size_gateop;
         uint64_t num_operand_qubits;
 
-        qcs::complex_t *state_data_device;
+        qcs::complex_t *state_data_device = nullptr;
 
         qcs::complex_t *zero_constant_addr;
         qcs::kernel_common_struct *qcs_kernel_common_constant_addr;
@@ -1121,7 +1125,7 @@ namespace qcs
         qcs::work_buffer scratch;
         int log_swap_buffer_total_length;
         uint64_t swap_buffer_total_length;
-        qcs::complex_t *swap_buffer;
+        qcs::complex_t *swap_buffer = nullptr;
 #ifdef QCS_ENABLE_NVSHMEM
         uint64_t *exchange_signals = nullptr;
         uint64_t exchange_generation = 0;
@@ -1171,8 +1175,42 @@ namespace qcs
         {
 
             MPI_Init(NULL, NULL);
+            try { setup_after_mpi(); }
+            catch (...)
+            {
+                if (nccl_comm) { ncclCommAbort(nccl_comm); nccl_comm = nullptr; }
+                for (int slot = 0; slot < 2; ++slot)
+                {
+                    if (exchange_transfer_done[slot]) cudaEventDestroy(exchange_transfer_done[slot]);
+                    if (exchange_copy_done[slot]) cudaEventDestroy(exchange_copy_done[slot]);
+                }
+                if (exchange_copy_stream) cudaStreamDestroy(exchange_copy_stream);
+                if (stream) cudaStreamDestroy(stream);
+                MPI_Finalize();
+                throw;
+            }
+        }
+
+        void setup_after_mpi()
+        {
             MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
             MPI_Comm_rank(MPI_COMM_WORLD, &proc_num);
+
+            // Check before creating the communicator, including mixed binaries.
+            int local_mode = nccl_buffer_mode, min_mode = 0, max_mode = 0;
+            ATLC_CHECK_MPI(MPI_Allreduce, &local_mode, &min_mode, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            ATLC_CHECK_MPI(MPI_Allreduce, &local_mode, &max_mode, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            if (min_mode != max_mode) throw std::runtime_error("NCCL buffer mode differs across ranks");
+            int version = 0;
+            ATLC_CHECK_NCCL(ncclGetVersion, &version);
+            const char* pxn = std::getenv("NCCL_PXN_DISABLE");
+            int supported = nccl_buffer_mode == 0 ||
+                (NCCL_VERSION_CODE >= 23102 && version >= 23102 && !exchange_nvshmem_registered_put &&
+                 (nccl_buffer_mode != 2 || (pxn && std::string(pxn) == "1")));
+            int all_supported = 0;
+            ATLC_CHECK_MPI(MPI_Allreduce, &supported, &all_supported, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            if (!all_supported) throw std::runtime_error(
+                "NCCL buffer modes 1/2 require NCCL >= 2.31.2 and NCCL exchange; mode 2 requires NCCL_PXN_DISABLE=1 on every rank");
 
             atlc::group_by_hostname(proc_num, num_procs, my_hostname, my_node_number, my_node_local_rank, node_count);
             // fprintf(stderr, "[debug] Rank %d on host %s -> assigned node number: %d, local node rank: %d (total nodes: %d)\n", proc_num, my_hostname.c_str(), my_node_number, my_node_local_rank, node_count);
@@ -1291,6 +1329,64 @@ namespace qcs
 
         void allocate_memory(bit_num_t num_qubits, qcs_initial_state selected_state = QCS_INITIAL_STATE_ZERO)
         {
+            if constexpr (exchange_nvshmem_registered_put)
+            {
+                allocate_memory_impl(num_qubits, selected_state);
+                return;
+            }
+            // All ranks enter initialization together. Never roll back an existing lifetime.
+            int active = this->num_qubits != 0 || state_data_device || scratch.data();
+            int any_active = 0;
+            ATLC_CHECK_MPI(MPI_Allreduce, &active, &any_active, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            if (any_active) throw std::runtime_error("free existing memory on all ranks before reallocating");
+            int dimensions[] = {int(num_qubits), int(selected_state), int(use_unified_memory)};
+            int min_dimensions[3]{}, max_dimensions[3]{};
+            ATLC_CHECK_MPI(MPI_Allreduce, dimensions, min_dimensions, 3, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            ATLC_CHECK_MPI(MPI_Allreduce, dimensions, max_dimensions, 3, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            for (int i = 0; i < 3; ++i)
+                if (min_dimensions[i] != max_dimensions[i])
+                    throw std::runtime_error("allocation configuration differs across ranks");
+            std::string error;
+            try
+            {
+                if (nccl_buffer_mode && use_unified_memory)
+                    throw std::runtime_error("NCCL buffer modes 1/2 do not support managed memory");
+                double start = MPI_Wtime();
+                allocate_memory_impl(num_qubits, selected_state);
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                allocation_seconds = MPI_Wtime() - start;
+                start = MPI_Wtime();
+                if (nccl_buffer_mode == 2)
+                {
+                    register_nccl_buffer(nccl_comm, state_data_device,
+                        num_states_local * sizeof(*state_data_device), &state_registration);
+                    // Includes every swap slot and measurement AllReduce region.
+                    register_nccl_buffer(nccl_comm, scratch.data(), scratch.size(), &scratch_registration);
+                }
+                registration_seconds = nccl_buffer_mode == 2 ? MPI_Wtime() - start : 0;
+            }
+            catch (const std::exception& e) { error = e.what(); }
+            int ok = error.empty(), all_ok = 0;
+            ATLC_CHECK_MPI(MPI_Allreduce, &ok, &all_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            if (!all_ok)
+            {
+                if (!error.empty()) fprintf(stderr, "[error] rank %d NCCL buffer initialization: %s\n", proc_num, error.c_str());
+                free_memory();
+                throw std::runtime_error("NCCL buffer initialization failed on at least one rank; see rank diagnostics");
+            }
+            if (nccl_buffer_mode != 0)
+            {
+                // Free-memory differences must not produce different chunk boundaries.
+                int common_log = 0;
+                ATLC_CHECK_MPI(MPI_Allreduce, &log_swap_buffer_total_length, &common_log,
+                               1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                log_swap_buffer_total_length = common_log;
+                swap_buffer_total_length = UINT64_C(1) << common_log;
+            }
+        }
+
+        void allocate_memory_impl(bit_num_t num_qubits, qcs_initial_state selected_state)
+        {
             // Reject invalid API values before allocating device resources.
             switch (selected_state)
             {
@@ -1375,7 +1471,12 @@ namespace qcs
             }
             else
 #endif
-            if (use_unified_memory)
+            if (nccl_buffer_mode != 0)
+            {
+                state_data_device = static_cast<qcs::complex_t *>(allocate_nccl_buffer(
+                    num_states_local * sizeof(*state_data_device)));
+            }
+            else if (use_unified_memory)
             {
                 ATLC_CHECK_CUDA(cudaMallocManaged, &state_data_device, num_states_local * sizeof(*state_data_device));
             }
@@ -1438,7 +1539,7 @@ namespace qcs
                     exchange_chunk_bytes, uint64_t(exchange_grid_blocks) * exchange_chunk_bytes);
             }
 #endif
-            scratch.allocate_remaining(stream);
+            scratch.allocate_remaining(stream, nccl_buffer_mode != 0);
             measurement_workspace = std::make_unique<measurement_detail::workspace>(stream, scratch.device);
             if constexpr (!exchange_nvshmem_registered_put)
             {
@@ -1458,6 +1559,12 @@ namespace qcs
 
         void free_memory()
         {
+            // Join both streams even after a partially enqueued exchange failed.
+            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            if constexpr (exchange_pipeline_copy_back && !exchange_nvshmem_registered_put)
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
+            deregister_nccl_buffer(nccl_comm, scratch_registration);
+            deregister_nccl_buffer(nccl_comm, state_registration);
             if (measurement_workspace)
             {
                 // Queue release after every use, before releasing the state or stream.
@@ -1485,7 +1592,8 @@ namespace qcs
 #endif
             if (state_data_device)
             {
-                ATLC_CHECK_CUDA(cudaFreeAsync, state_data_device, stream);
+                if (nccl_buffer_mode != 0) free_nccl_buffer(state_data_device);
+                else ATLC_CHECK_CUDA(cudaFreeAsync, state_data_device, stream);
                 state_data_device = NULL;
             }
             scratch.close();
@@ -2529,6 +2637,11 @@ int main() {
 #ifdef QCS_ENABLE_NVSHMEM
             if constexpr (exchange_nvshmem_registered_put) nvshmem_finalize();
 #endif
+            if (nccl_comm)
+            {
+                ATLC_CHECK_NCCL(ncclCommDestroy, nccl_comm);
+                nccl_comm = nullptr;
+            }
             MPI_Finalize();
         };
 
@@ -2743,7 +2856,8 @@ extern "C" int qcs_set_exception_callback(qcs_exception_callback callback)
 qcs_simulator *qcs_simulator_create_cxx()
 {
     qcs_simulator *sim = new qcs_simulator();
-    qcs_simulator_setup(sim);
+    try { qcs_simulator_setup(sim); }
+    catch (...) { delete sim; throw; }
     return sim;
 }
 
@@ -2761,7 +2875,8 @@ static void qcs_simulator_setup(qcs_simulator *sim)
 {
     qcs_simulator_init(sim);
     sim->core = new qcs::simulator_core();
-    sim->core->setup();
+    try { sim->core->setup(); }
+    catch (...) { delete sim->core; sim->core = nullptr; throw; }
 }
 
 void qcs_simulator_allocate_memory_cxx(qcs_simulator *sim) { qcs_simulator_allocate_memory_cxx(sim, QCS_INITIAL_STATE_ZERO); }

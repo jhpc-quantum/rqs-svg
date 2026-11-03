@@ -4,6 +4,9 @@ NVCC ?= nvcc --forward-unknown-to-host-compiler
 CXX ?= g++
 INCLUDE ?= -I./include
 NVCC_CFLAGS = $(CFLAGS_VENDOR) -Wformat=2 $(INCLUDE) -O3 -rdynamic -std=c++17 -Wno-deprecated-gpu-targets $(GENCODE_FLAGS)
+# 0 = baseline, 1 = ncclMemAlloc only, 2 = ncclMemAlloc + ncclCommRegister.
+NCCL_BUFFER_MODE ?= 0
+NVCC_CFLAGS += -DQCS_NCCL_BUFFER_MODE=$(NCCL_BUFFER_MODE)
 NVCC_LDFLAGS = $(LDFLAGS_VENDOR) -L./lib $(LDLIBS) --cudart=shared
 # Set NVSHMEM=1 to enable NVSHMEM registered-PUT exchange.
 # NVSHMEM_HOME must point to an installation built with MPI support.
@@ -35,7 +38,7 @@ $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQC
 	mkdir -p $(dir $@)
 	$(CXX) $(INCLUDE) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
-$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp include/qcs.h
+$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) -fPIC -shared src/qcs.cu -o $@ $(NVCC_LDFLAGS)
 
@@ -69,7 +72,7 @@ test-measurement-integration: $(MEASUREMENT_INTEGRATION_TEST)
 	./$(MEASUREMENT_INTEGRATION_TEST)
 
 INITIAL_STATE_TEST ?= bin/initial_state_test
-$(INITIAL_STATE_TEST): tests/initial_state_test.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp include/qcs.h
+$(INITIAL_STATE_TEST): tests/initial_state_test.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
 
@@ -93,7 +96,7 @@ MEASUREMENT_HARNESS_DIR ?= bin/measurement-harness-$(MEASUREMENT_METADATA)
 MEASUREMENT_HARNESS = $(MEASUREMENT_HARNESS_DIR)/measurement_harness
 MEASUREMENT_HARNESS_ARGS ?= regression 12
 
-$(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh $(MEASUREMENT_HARNESS_SOURCE)/src/work_buffer.*)
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh $(MEASUREMENT_HARNESS_SOURCE)/src/work_buffer.* $(MEASUREMENT_HARNESS_SOURCE)/src/nccl_buffer.cuh)
 	python3 scripts/prepare_measurement_harness.py --source $(MEASUREMENT_HARNESS_SOURCE) --output $(MEASUREMENT_HARNESS_DIR) --metadata $(MEASUREMENT_METADATA)
 
 $(MEASUREMENT_HARNESS): tests/measurement_harness.cu tests/measurement_sampling_cases.hpp tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
@@ -119,3 +122,12 @@ $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test: tests/measurement_integ
 test-measurement-metadata: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test $(MEASUREMENT_HARNESS)
 	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
 	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) regression 12
+
+# Build only; run explicitly under the target cluster's MPI launcher.
+NCCL_BUFFER_HARNESS ?= bin/nccl-buffer-$(NCCL_BUFFER_MODE)
+$(NCCL_BUFFER_HARNESS): tests/nccl_buffer_harness.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: nccl-buffer-harness
+nccl-buffer-harness: $(NCCL_BUFFER_HARNESS)

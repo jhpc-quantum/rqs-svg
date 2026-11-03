@@ -1,6 +1,7 @@
 #pragma once
 
 #include "work_buffer.hpp"
+#include "nccl_buffer.cuh"
 #include <cuda_runtime.h>
 #include <atlc/check_cuda.hpp>
 #ifdef QCS_ENABLE_NVSHMEM
@@ -16,6 +17,8 @@ class work_buffer
 {
     void* data_ = nullptr;
     cudaStream_t stream_{};
+    bool nccl_owned_ = false;
+    size_t bytes_ = 0;
 #ifdef QCS_ENABLE_NVSHMEM
     void* symmetric_data_ = nullptr;
 #endif
@@ -27,7 +30,10 @@ public:
     work_buffer(const work_buffer&) = delete;
     work_buffer& operator=(const work_buffer&) = delete;
 
-    void allocate_remaining(cudaStream_t stream)
+    void* data() const { return data_; }
+    size_t size() const { return bytes_; }
+
+    void allocate_remaining(cudaStream_t stream, bool nccl_owned = false)
     {
         if (data_) throw std::runtime_error("work buffer: already allocated");
         stream_ = stream;
@@ -37,7 +43,10 @@ public:
         ATLC_CHECK_CUDA(cudaMemGetInfo, &free_bytes, &total_bytes);
         size_t bytes = buffer_arena::budget(free_bytes);
         if (!bytes) throw std::runtime_error("work buffer: no free device memory");
-        ATLC_CHECK_CUDA(cudaMalloc, &data_, bytes);
+        nccl_owned_ = nccl_owned;
+        if (nccl_owned_) data_ = allocate_nccl_buffer(bytes);
+        else ATLC_CHECK_CUDA(cudaMalloc, &data_, bytes);
+        bytes_ = bytes;
         device = buffer_arena(data_, bytes);
     }
 
@@ -61,10 +70,12 @@ public:
         symmetric = buffer_arena();
         if (data_)
         {
-            ATLC_CHECK_CUDA(cudaFreeAsync, data_, stream_);
+            if (nccl_owned_) free_nccl_buffer(data_);
+            else ATLC_CHECK_CUDA(cudaFreeAsync, data_, stream_);
             data_ = nullptr;
         }
         device = buffer_arena();
+        bytes_ = 0;
     }
 };
 } // namespace qcs
