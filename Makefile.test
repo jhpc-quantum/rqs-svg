@@ -1,0 +1,85 @@
+MEASUREMENT_REDUCE_TEST ?= bin/measurement_reduce_test
+$(MEASUREMENT_REDUCE_TEST): tests/measurement_reduce_test.cu src/measurement_reduce.cuh src/work_buffer.hpp
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) tests/measurement_reduce_test.cu -o $@ $(LDFLAGS_VENDOR) --cudart=shared
+
+.PHONY: test-measurement-reduce
+test-measurement-reduce: $(MEASUREMENT_REDUCE_TEST)
+	./$(MEASUREMENT_REDUCE_TEST)
+
+WORK_BUFFER_TEST ?= bin/work_buffer_test
+$(WORK_BUFFER_TEST): tests/work_buffer_test.cpp src/work_buffer.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-work-buffer
+test-work-buffer: $(WORK_BUFFER_TEST)
+	$(WORK_BUFFER_TEST)
+
+# MPI_CXX must use the MPI installation linked into libqcs.
+MPI_CXX ?= mpicxx
+MEASUREMENT_INTEGRATION_TEST ?= bin/measurement_integration_test
+$(MEASUREMENT_INTEGRATION_TEST): tests/measurement_integration_test.cpp include/qcs.h $(LIBQCS_SO)
+	mkdir -p $(dir $@)
+	$(MPI_CXX) -std=c++17 $(INCLUDE) $< -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
+
+.PHONY: test-measurement-integration
+test-measurement-integration: $(MEASUREMENT_INTEGRATION_TEST)
+	./$(MEASUREMENT_INTEGRATION_TEST)
+
+INITIAL_STATE_TEST ?= bin/initial_state_test
+$(INITIAL_STATE_TEST): tests/initial_state_test.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-initial-state
+test-initial-state: $(INITIAL_STATE_TEST)
+	./$(INITIAL_STATE_TEST)
+
+# Compile private instrumented source copies, including the recorded CUB tree.
+# Vendor flags must include the same MPI headers/libraries as the production build.
+MEASUREMENT_METADATA ?= constant
+MEASUREMENT_HARNESS_SOURCE ?= $(CURDIR)
+MEASUREMENT_HARNESS_DIR ?= bin/measurement-harness-$(MEASUREMENT_METADATA)
+MEASUREMENT_HARNESS = $(MEASUREMENT_HARNESS_DIR)/measurement_harness
+MEASUREMENT_HARNESS_ARGS ?= regression 12
+
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: scripts/prepare_measurement_harness.py $(MEASUREMENT_HARNESS_SOURCE)/src/qcs.cu $(wildcard $(MEASUREMENT_HARNESS_SOURCE)/src/measurement_reduce.cuh $(MEASUREMENT_HARNESS_SOURCE)/src/work_buffer.* $(MEASUREMENT_HARNESS_SOURCE)/src/nccl_buffer.cuh)
+	python3 scripts/prepare_measurement_harness.py --source $(MEASUREMENT_HARNESS_SOURCE) --output $(MEASUREMENT_HARNESS_DIR) --metadata $(MEASUREMENT_METADATA)
+
+$(MEASUREMENT_HARNESS): tests/measurement_harness.cu tests/measurement_sampling_cases.hpp tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
+	$(NVCC) $(NVCC_CFLAGS) -I$(abspath $(MEASUREMENT_HARNESS_DIR)) tests/measurement_harness.cu -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: measurement-harness test-measurement-distributed benchmark-measurement
+measurement-harness: $(MEASUREMENT_HARNESS)
+test-measurement-distributed: $(MEASUREMENT_HARNESS)
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) $(MEASUREMENT_HARNESS_ARGS)
+benchmark-measurement: $(MEASUREMENT_HARNESS)
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) benchmark $(BENCH_QUBITS) $(BENCH_WARMUPS) $(BENCH_REPETITIONS)
+
+MPIEXEC ?= mpiexec
+RANKS ?= 1
+BENCH_QUBITS ?= 12
+BENCH_WARMUPS ?= 5
+BENCH_REPETITIONS ?= 30
+
+$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test: tests/measurement_integration_private.cu tests/measurement_integration_test.cpp tests/measurement_probe.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
+	$(NVCC) $(NVCC_CFLAGS) -I$(abspath $(MEASUREMENT_HARNESS_DIR)) tests/measurement_integration_private.cu -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-measurement-metadata
+test-measurement-metadata: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test $(MEASUREMENT_HARNESS)
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) regression 12
+
+# Build only; run explicitly under the target cluster's MPI launcher.
+NCCL_BUFFER_HARNESS ?= bin/nccl-buffer-$(NCCL_BUFFER_MODE)-graph-$(NCCL_GRAPH_MODE)
+$(NCCL_BUFFER_HARNESS): tests/nccl_buffer_harness.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: nccl-buffer-harness
+nccl-buffer-harness: $(NCCL_BUFFER_HARNESS)
+
+# Include every test and harness binary in the main clean target.
+TEST_BINARIES = $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST) $(WORK_BUFFER_TEST) $(INITIAL_STATE_TEST) \
+	$(MEASUREMENT_HARNESS) $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test $(NCCL_BUFFER_HARNESS)
