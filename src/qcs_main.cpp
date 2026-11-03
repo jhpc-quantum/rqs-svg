@@ -204,7 +204,6 @@ int main(int argc, char **argv)
             qcs_simulator_reinitialize_mapping(sim.get());
             qcs_simulator_set_zero_state(sim.get());
             qcs_simulator_reset_clbits(sim.get());
-            qcs_simulator_reset_measurement_state(sim.get());
         }
     }
 
