@@ -68,13 +68,22 @@ $(MEASUREMENT_INTEGRATION_TEST): tests/measurement_integration_test.cpp include/
 test-measurement-integration: $(MEASUREMENT_INTEGRATION_TEST)
 	./$(MEASUREMENT_INTEGRATION_TEST)
 
+INITIAL_STATE_TEST ?= bin/initial_state_test
+$(INITIAL_STATE_TEST): tests/initial_state_test.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-initial-state
+test-initial-state: $(INITIAL_STATE_TEST)
+	./$(INITIAL_STATE_TEST)
+
 .PHONY: gengetopt
 gengetopt: src/qcs_args.ggo
 	gengetopt --input=$< --unamed-opts --file-name=qcs_args --output-dir=src
 
 .PHONY: clean
 clean:
-	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST) $(WORK_BUFFER_TEST)
+	$(RM) $(QCS_BIN) $(LIBQCS_SO) $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST) $(WORK_BUFFER_TEST) $(INITIAL_STATE_TEST)
 
 # Compile private instrumented source copies, including the recorded CUB tree.
 # Vendor flags must include the same MPI headers/libraries as the production build.

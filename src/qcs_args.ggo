@@ -9,3 +9,4 @@ option "num-samples" s "Number of measurement samples" int default="1" no
 option "mapping" - "Comma-separated physical-to-logical qubit mapping" string no
 option "reversed-mapping" r "Reverse the qubit mapping (swap perm_p2l/perm_l2p)" flag off
 option "output-statevector" - "Write final statevector to the specified file" string no
+option "initial-state" - "Initial state: zero, flat, entangled, sequential, use_curand, load_statevector" string default="zero" no

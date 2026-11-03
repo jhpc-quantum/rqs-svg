@@ -336,6 +336,35 @@ mpirun -np (NUM_GPUS) ./bin/qcs [--num-samples NUM_SAMPLES|-s NUM_SAMPLES] user_
 mpirun -np (NUM_GPUS) ./bin/qcs --output-statevector data.bin user_circuit.so
 ```
 
+### Initial state selection
+
+Use `bin/qcs --initial-state flat --num-samples 10 circuit.so` to select
+`zero` (the default), `flat`, `entangled`, `sequential`, `use_curand`, or
+`load_statevector`. Allocation and every subsequent sample reset use the same
+initializer. Existing amplitudes and normalization behavior are preserved.
+`use_curand` reuses the existing seed on each reset, regenerating the same initial
+vector while measurement sampling continues to advance its own RNG cursor.
+`load_statevector` calls the existing `initialize_laod_statevector()` and rereads
+`statevector_input.bin` from the working directory on every reset, retaining its
+existing per-rank physical slice layout.
+
+The original C function `qcs_simulator_allocate_memory(sim)` and its ABI remain
+available and select zero. C callers can select another method with
+`qcs_simulator_allocate_memory_with_initial_state(sim, QCS_INITIAL_STATE_FLAT)`;
+C++ callers can also use `qcs_simulator_allocate_memory(sim, QCS_INITIAL_STATE_FLAT)`.
+The throwing C++ API has the corresponding two-argument
+`qcs_simulator_allocate_memory_cxx` overload. Invalid enum values throw through
+the C++ API and return failure through the C API's existing exception callback.
+The legacy `qcs_simulator_set_zero_state` name now restores the selected method.
+It discards measurement metadata; callers still reset the mapping and classical
+bits separately. Explicit flat/sequential/entangled/random setters retain their
+existing behavior and do not change the method remembered at allocation.
+
+`make test-initial-state` builds and runs single-GPU regression coverage for all
+six methods, invalid enum rejection, legacy default allocation, and restoration
+after repeated measurements. Run it with one MPI rank on a CUDA/MPI/NCCL system.
+
+
 ## Acknowledgments
 
 This repository is based on results obtained from a project, JPNP20017, commissioned by the New Energy and Industrial Technology Development Organization (NEDO).

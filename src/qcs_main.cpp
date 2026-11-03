@@ -16,6 +16,18 @@
 #include <qcs.h>
 #include "qcs_args.h"
 
+static qcs_initial_state parse_initial_state(const char *name)
+{
+    if (std::strcmp(name, "zero") == 0) return QCS_INITIAL_STATE_ZERO;
+    if (std::strcmp(name, "flat") == 0) return QCS_INITIAL_STATE_FLAT;
+    if (std::strcmp(name, "entangled") == 0) return QCS_INITIAL_STATE_ENTANGLED;
+    if (std::strcmp(name, "sequential") == 0) return QCS_INITIAL_STATE_SEQUENTIAL;
+    if (std::strcmp(name, "use_curand") == 0) return QCS_INITIAL_STATE_USE_CURAND;
+    if (std::strcmp(name, "load_statevector") == 0) return QCS_INITIAL_STATE_LOAD_STATEVECTOR;
+    throw std::invalid_argument(std::string("invalid --initial-state: ") + name +
+        " (expected zero, flat, entangled, sequential, use_curand, load_statevector)");
+}
+
 static std::vector<bit_num_t> parse_mapping_csv(std::string const &mapping_text)
 {
     if (mapping_text.empty())
@@ -76,6 +88,8 @@ int main(int argc, char **argv)
     {
         throw std::runtime_error("user circuit shared object path is required");
     }
+
+    qcs_initial_state const initial_state = parse_initial_state(parsed_options.initial_state_arg);
 
     qcs_set_exception_callback([](char const *message, size_t length)
     {
@@ -157,7 +171,10 @@ int main(int argc, char **argv)
     }
     qcs_simulator_set_mapping(sim.get(), mapping.data(), mapping.size());
 
-    qcs_simulator_allocate_memory(sim.get());
+    if (!qcs_simulator_allocate_memory(sim.get(), initial_state))
+    {
+        throw std::runtime_error("qcs_simulator_allocate_memory failed");
+    }
 
     bit_t event_1 = 0;
     bit_t event_2 = 0;
@@ -202,7 +219,10 @@ int main(int argc, char **argv)
         if (sample_num != num_samples - 1)
         {
             qcs_simulator_reinitialize_mapping(sim.get());
-            qcs_simulator_set_zero_state(sim.get());
+            if (!qcs_simulator_set_zero_state(sim.get()))
+            {
+                throw std::runtime_error("state reinitialization failed");
+            }
             qcs_simulator_reset_clbits(sim.get());
         }
     }

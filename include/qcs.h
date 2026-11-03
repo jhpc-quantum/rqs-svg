@@ -7,6 +7,17 @@
 #include <stdint.h>
 #endif
 
+/* Initializers retain their existing amplitudes (no implicit normalization). */
+typedef enum qcs_initial_state
+{
+    QCS_INITIAL_STATE_ZERO = 0,
+    QCS_INITIAL_STATE_FLAT,
+    QCS_INITIAL_STATE_ENTANGLED,
+    QCS_INITIAL_STATE_SEQUENTIAL,
+    QCS_INITIAL_STATE_USE_CURAND,
+    QCS_INITIAL_STATE_LOAD_STATEVECTOR
+} qcs_initial_state;
+
 typedef struct qcs_simulator qcs_simulator;
 typedef void (*qcs_exception_callback)(char const *message, size_t message_length);
 typedef int16_t bit_num_t;
@@ -18,6 +29,7 @@ typedef int16_t event_num_t;
 qcs_simulator *qcs_simulator_create_cxx(void);
 void qcs_simulator_destroy_cxx(qcs_simulator *sim);
 void qcs_simulator_allocate_memory_cxx(qcs_simulator *sim);
+void qcs_simulator_allocate_memory_cxx(qcs_simulator *sim, qcs_initial_state initial_state);
 void qcs_simulator_dispose_cxx(qcs_simulator *sim);
 int qcs_simulator_get_num_procs_cxx(qcs_simulator *sim);
 int qcs_simulator_get_proc_num_cxx(qcs_simulator *sim);
@@ -29,6 +41,7 @@ void qcs_simulator_set_num_clbits_cxx(qcs_simulator *sim, bit_num_t num_clbits);
 void qcs_simulator_get_clbits_cxx(const qcs_simulator *sim, bit_t *clbits);
 void qcs_simulator_get_clbits_string_cxx(const qcs_simulator *sim, char *clbits_string);
 void qcs_simulator_reset_cxx(qcs_simulator *sim, bit_num_t qubit_num);
+/* Restores the initial state selected at allocation. */
 void qcs_simulator_set_zero_state_cxx(qcs_simulator *sim);
 void qcs_simulator_set_sequential_state_cxx(qcs_simulator *sim);
 void qcs_simulator_set_flat_state_cxx(qcs_simulator *sim);
@@ -88,7 +101,9 @@ extern "C"
 int qcs_set_exception_callback(qcs_exception_callback callback);
 int qcs_simulator_create(qcs_simulator **result);
 int qcs_simulator_destroy(qcs_simulator *sim);
+/* Legacy entry point selects zero; the explicit variant is also available in C. */
 int qcs_simulator_allocate_memory(qcs_simulator *sim);
+int qcs_simulator_allocate_memory_with_initial_state(qcs_simulator *sim, qcs_initial_state initial_state);
 int qcs_simulator_dispose(qcs_simulator *sim);
 int qcs_simulator_get_num_procs(qcs_simulator *sim, bit_t *result);
 int qcs_simulator_get_proc_num(qcs_simulator *sim, bit_t *result);
@@ -100,6 +115,8 @@ int qcs_simulator_set_num_clbits(qcs_simulator *sim, bit_num_t num_clbits);
 int qcs_simulator_get_clbits(const qcs_simulator *sim, bit_t *clbits);
 int qcs_simulator_get_clbits_string(const qcs_simulator *sim, char *clbits_string);
 int qcs_simulator_reset(qcs_simulator *sim, bit_num_t qubit_num);
+/* Restores the method selected at allocation and clears measurement metadata.
+ * Mapping and classical bits are reset separately by the caller. */
 int qcs_simulator_set_zero_state(qcs_simulator *sim);
 int qcs_simulator_set_sequential_state(qcs_simulator *sim);
 int qcs_simulator_set_flat_state(qcs_simulator *sim);
@@ -162,5 +179,13 @@ int qcs_simulator_event_create(qcs_simulator *sim, bit_t *result);
 int qcs_simulator_event_record(qcs_simulator *sim, int event_num);
 int qcs_simulator_event_get_elapsed_time(qcs_simulator *sim, event_num_t start_event_num, event_num_t stop_event_num, double *result);
 #ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
+/* Preserve the original C symbol and one-argument source/ABI compatibility. */
+inline int qcs_simulator_allocate_memory(qcs_simulator *sim, qcs_initial_state initial_state)
+{
+    return qcs_simulator_allocate_memory_with_initial_state(sim, initial_state);
 }
 #endif

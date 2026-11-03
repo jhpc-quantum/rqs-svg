@@ -1081,6 +1081,7 @@ namespace qcs
         std::vector<int> perm_l2p;
         std::vector<int> initial_perm_p2l;
 
+        qcs_initial_state initial_state = QCS_INITIAL_STATE_ZERO;
         int num_samples;
         unsigned int rng_seed;
         // Simulator-lifetime RNG cursor; state/bookkeeping/shot resets leave it
@@ -1288,8 +1289,22 @@ namespace qcs
             }
         }
 
-        void allocate_memory(bit_num_t num_qubits)
+        void allocate_memory(bit_num_t num_qubits, qcs_initial_state selected_state = QCS_INITIAL_STATE_ZERO)
         {
+            // Reject invalid API values before allocating device resources.
+            switch (selected_state)
+            {
+            case QCS_INITIAL_STATE_ZERO:
+            case QCS_INITIAL_STATE_FLAT:
+            case QCS_INITIAL_STATE_ENTANGLED:
+            case QCS_INITIAL_STATE_SEQUENTIAL:
+            case QCS_INITIAL_STATE_USE_CURAND:
+            case QCS_INITIAL_STATE_LOAD_STATEVECTOR:
+                break;
+            default:
+                throw std::invalid_argument("invalid initial state");
+            }
+            initial_state = selected_state;
 
             size_t total_memory_bytes = 0;
             size_t free_memory_bytes = 0;
@@ -1368,7 +1383,7 @@ namespace qcs
             {
                 ATLC_CHECK_CUDA(cudaMallocAsync, &state_data_device, num_states_local * sizeof(*state_data_device), stream);
             }
-            initialize_zero();
+            initialize_selected_state();
 
             qcs_kernel_common_host.num_qubits = num_qubits;
             qcs_kernel_common_host.state_data_device = state_data_device;
@@ -1477,6 +1492,20 @@ namespace qcs
             swap_buffer = nullptr;
             swap_buffer_total_length = 0;
             this->num_qubits = 0;
+        }
+
+        void initialize_selected_state()
+        {
+            switch (initial_state)
+            {
+            case QCS_INITIAL_STATE_ZERO: initialize_zero(); break;
+            case QCS_INITIAL_STATE_FLAT: initialize_flat(); break;
+            case QCS_INITIAL_STATE_ENTANGLED: initialize_entangled(); break;
+            case QCS_INITIAL_STATE_SEQUENTIAL: initialize_sequential(); break;
+            case QCS_INITIAL_STATE_USE_CURAND: initialize_use_curand(); break;
+            case QCS_INITIAL_STATE_LOAD_STATEVECTOR: initialize_laod_statevector(); break;
+            default: throw std::invalid_argument("invalid initial state");
+            }
         }
 
         void initialize_sequential()
@@ -2734,7 +2763,11 @@ static void qcs_simulator_setup(qcs_simulator *sim)
     sim->core->setup();
 }
 
-void qcs_simulator_allocate_memory_cxx(qcs_simulator *sim) { sim->core->allocate_memory(sim->num_qubits); }
+void qcs_simulator_allocate_memory_cxx(qcs_simulator *sim) { qcs_simulator_allocate_memory_cxx(sim, QCS_INITIAL_STATE_ZERO); }
+void qcs_simulator_allocate_memory_cxx(qcs_simulator *sim, qcs_initial_state initial_state)
+{
+    sim->core->allocate_memory(sim->num_qubits, initial_state);
+}
 void qcs_simulator_dispose_cxx(qcs_simulator *sim)
 {
     sim->core->dispose();
@@ -2854,7 +2887,7 @@ void qcs_simulator_reset_cxx(qcs_simulator *sim, bit_num_t qubit_num)
     if (qcs_simulator_measure_cxx(sim, qubit_num))
         qcs_simulator_gate_x_cxx(sim, &qubit_num, 1, NULL, 0, NULL, 0);
 }
-void qcs_simulator_set_zero_state_cxx(qcs_simulator *sim) { sim->core->initialize_zero(); }
+void qcs_simulator_set_zero_state_cxx(qcs_simulator *sim) { sim->core->initialize_selected_state(); }
 void qcs_simulator_set_sequential_state_cxx(qcs_simulator *sim) { sim->core->initialize_sequential(); }
 void qcs_simulator_set_flat_state_cxx(qcs_simulator *sim) { sim->core->initialize_flat(); }
 void qcs_simulator_set_entangled_state_cxx(qcs_simulator *sim) { sim->core->initialize_entangled(); }
@@ -3171,6 +3204,12 @@ extern "C" int qcs_simulator_allocate_memory(qcs_simulator *sim)
 {
     return qcs_try_cxx([&]()
                 { qcs_simulator_allocate_memory_cxx(sim); });
+}
+
+extern "C" int qcs_simulator_allocate_memory_with_initial_state(qcs_simulator *sim, qcs_initial_state initial_state)
+{
+    return qcs_try_cxx([&]()
+                { qcs_simulator_allocate_memory_cxx(sim, initial_state); });
 }
 
 extern "C" int qcs_simulator_dispose(qcs_simulator *sim)

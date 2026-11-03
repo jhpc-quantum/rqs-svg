@@ -40,6 +40,7 @@ const char *gengetopt_args_info_help[] = {
   "      --mapping=STRING          Comma-separated physical-to-logical qubit\n                                  mapping",
   "  -r, --reversed-mapping        Reverse the qubit mapping (swap\n                                  perm_p2l/perm_l2p)  (default=off)",
   "      --output-statevector=STRING\n                                Write final statevector to the specified file",
+  "      --initial-state=STRING     Initial state: zero, flat, entangled, sequential,\n                                  use_curand, load_statevector (default=`zero')",
     0
 };
 
@@ -71,6 +72,7 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->mapping_given = 0 ;
   args_info->reversed_mapping_given = 0 ;
   args_info->output_statevector_given = 0 ;
+  args_info->initial_state_given = 0 ;
 }
 
 static
@@ -84,6 +86,8 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->reversed_mapping_flag = 0;
   args_info->output_statevector_arg = NULL;
   args_info->output_statevector_orig = NULL;
+  args_info->initial_state_arg = gengetopt_strdup("zero");
+  args_info->initial_state_orig = NULL;
   
 }
 
@@ -98,6 +102,7 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->mapping_help = gengetopt_args_info_help[3] ;
   args_info->reversed_mapping_help = gengetopt_args_info_help[4] ;
   args_info->output_statevector_help = gengetopt_args_info_help[5] ;
+  args_info->initial_state_help = gengetopt_args_info_help[6] ;
   
 }
 
@@ -195,6 +200,8 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->mapping_orig));
   free_string_field (&(args_info->output_statevector_arg));
   free_string_field (&(args_info->output_statevector_orig));
+  free_string_field (&(args_info->initial_state_arg));
+  free_string_field (&(args_info->initial_state_orig));
   
   
   for (i = 0; i < args_info->inputs_num; ++i)
@@ -240,6 +247,8 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "mapping", args_info->mapping_orig, 0);
   if (args_info->reversed_mapping_given)
     write_into_file(outfile, "reversed-mapping", 0, 0 );
+  if (args_info->initial_state_given)
+    write_into_file(outfile, "initial-state", args_info->initial_state_orig, 0);
   if (args_info->output_statevector_given)
     write_into_file(outfile, "output-statevector", args_info->output_statevector_orig, 0);
   
@@ -508,6 +517,7 @@ cmdline_parser_internal (
         { "mapping",	1, NULL, 0 },
         { "reversed-mapping",	0, NULL, 'r' },
         { "output-statevector",	1, NULL, 0 },
+        { "initial-state",	1, NULL, 0 },
         { 0,  0, 0, 0 }
       };
 
@@ -564,6 +574,16 @@ cmdline_parser_internal (
                 additional_error))
               goto failure;
           
+          }
+          /* Initial state selection (validated by qcs_main). */
+          else if (strcmp (long_options[option_index].name, "initial-state") == 0)
+          {
+            if (update_arg((void *)&(args_info->initial_state_arg),
+                &(args_info->initial_state_orig), &(args_info->initial_state_given),
+                &(local_args_info.initial_state_given), optarg, 0, "zero", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "initial-state", '-', additional_error))
+              goto failure;
           }
           /* Write final statevector to the specified file.  */
           else if (strcmp (long_options[option_index].name, "output-statevector") == 0)

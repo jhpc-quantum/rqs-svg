@@ -51,6 +51,11 @@ struct gengetopt_args_info
   char * output_statevector_orig;	/**< @brief Write final statevector to the specified file original value given at command line.  */
   const char *output_statevector_help; /**< @brief Write final statevector to the specified file help description.  */
   
+  char * initial_state_arg; /**< @brief Initial state (default='zero'). */
+  char * initial_state_orig; /**< @brief Original initial-state option value. */
+  const char *initial_state_help; /**< @brief Initial-state help description. */
+  unsigned int initial_state_given; /**< @brief Whether initial-state was given. */
+
   unsigned int help_given ;	/**< @brief Whether help was given.  */
   unsigned int version_given ;	/**< @brief Whether version was given.  */
   unsigned int num_samples_given ;	/**< @brief Whether num-samples was given.  */
