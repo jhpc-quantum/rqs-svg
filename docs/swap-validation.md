@@ -1,9 +1,72 @@
 # Dedicated SWAP regression and comparison report
 
-Status: tooling added; tests, compilation, symbol inspection, sanitizers and
-benchmarks have **not been run**, as requested. There are no measured correctness
-or performance results in this report. Toolchain and GPU availability were not
-probed. The commands below are deferred work for a configured CUDA/NCCL/MPI host.
+Status (2026-11-04): direct SWAP launch planning and its host coverage tests
+pass. Production and GPU harness builds were attempted but stop because `nvcc`
+is unavailable. MPI compiler/launcher and `nvidia-smi` are also unavailable, and
+there is no `config.mk`. GPU numerical, distributed, sanitizer, binary-symbol,
+and performance validation remain pending. The earlier report below records the
+original dedicated-kernel work; its pending GPU evidence still applies.
+
+## Direct ordinal launches (2026-11-04)
+
+`cuda_swap` now assigns one ordinal to each CUDA thread, guards the launch-local
+count before adding an explicit ordinal offset, and retains the same state index,
+control handling, partner calculation, and `index < partner` ownership rule.
+The target-pair loop remains; the device grid-stride loop is removed. Gate
+preparation, deferred projection, measurement bookkeeping, localization and MPI
+exchange paths retain their existing implementation.
+
+The simulator queries device properties and SWAP kernel attributes once during
+initialization. The SWAP block size respects the requested block size,
+`maxThreadsPerBlock`, `maxThreadsDim[0]`, and the kernel's maximum block size.
+`src/swap_launch.hpp` plans grids up to the actual `maxGridSize[0]`, without the
+old 65535 cap. Quotient/remainder ceiling division, widened multiplication, and
+remaining-count subtraction keep planning safe at 64-bit boundaries. Work beyond
+a single grid's capacity is split into consecutive, disjoint ordinal intervals
+on the same stream. Only the lower state index accesses each SWAP cycle, even
+when the two indices belong to different launch intervals.
+
+`make test-swap-launch` passed using the host C++ compiler with warnings treated
+as errors. It exhaustively simulates thread guards and offsets for work counts
+1..2049, block sizes 1/3/37/512, and grid limits 1/2/7, requiring every ordinal
+exactly once. Additional cases cover the old 65535-block boundary (including a
+65536-block launch), actual-size and simulated grid boundaries, invalid limits,
+thread-limit clamping, and counts/offsets near `UINT64_MAX`. The source dispatch
+audit also passed; it does not validate compiled symbols or CUDA execution.
+
+The GPU regression harness retains the independent CPU oracle and now runs its
+full existing numerical, controlled, measured, multi-pair and mapping matrix both
+with native limits and with at most three blocks of 37 threads. The latter forces
+multiple launches and partial blocks. A separate four-ordinal case exercises a
+work count below the usual block size. A focused `large` mode compares SWAP1 and
+SWAP4 against the CPU oracle on larger vectors, including two successive swaps.
+These GPU additions have not compiled or run here.
+
+```sh
+make test-swap-launch
+make sharedlibrary
+make test-swap RANKS=1
+make test-swap RANKS=2
+make test-swap RANKS=4
+make test-swap-large RANKS=1                    # 20 qubits
+# Optional actual former-cap boundary: 2^26 local work items, 131072 blocks
+# at the normal 512 threads/block. Needs 1 GiB GPU state plus workspace,
+# and several GiB host memory for full-vector oracle copies. Use one rank.
+make test-swap-large RANKS=1 SWAP_LARGE_QUBITS=26
+```
+
+The existing `compare_swap.py` commands below can compare the committed current
+implementation with the original generic kernel using the same updated oracle.
+For a direct before/after comparison of the grid-stride version, build the parent
+revision and this revision separately with this harness, then run `regression`,
+`large 20`, and `benchmark 24 5 30` in each build. The comparison script's baseline
+symbol audit specifically requires the original generic implementation.
+
+A launch now has enough threads for its whole assigned interval, so work above
+the old cap uses larger grids. No per-SWAP device-property query is added.
+Splitting beyond the actual device grid limit adds host/kernel-launch overhead;
+normal work within that limit still uses one launch. Runtime effects have not
+been measured.
 
 ## Source observations and expected behavior
 

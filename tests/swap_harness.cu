@@ -195,6 +195,25 @@ static void regression(qcs_simulator* sim)
     }
     if (!c.proc_num) std::cout << "SWAP regression passed: vectors=" << checks << '\n';
 }
+// Focused numerical cases for larger vectors, including an optional 26-local-
+// qubit run whose uncontrolled launch crosses the former 65535-block boundary.
+static void large_regression(qcs_simulator* sim)
+{
+    auto& c = *sim->core;
+    for (int swaps : {1, 4})
+    {
+        auto t = targets_for(swaps, 2, c.num_qubits_local);
+        auto expected = initial(c, 0, 0);
+        load(c, expected);
+        for (int repeat = 0; repeat < 2; ++repeat)
+        {
+            operate(sim, t, {}, {}, true);
+            reference_swap(expected, t, {}, {});
+            check(c, expected);
+        }
+    }
+    if (!c.proc_num) std::cout << "SWAP large regression passed: vectors=" << checks << '\n';
+}
 static double maximum(double value)
 {
     double result = 0;
@@ -249,17 +268,46 @@ int main(int argc, char** argv)
     {
         auto& c = *sim->core;
         bool bench = argc > 1 && std::string(argv[1]) == "benchmark";
-        require(argc <= 1 || bench || std::string(argv[1]) == "regression", "unknown mode");
-        int bits = argc > 2 ? std::stoi(argv[2]) : 12;
+        bool large = argc > 1 && std::string(argv[1]) == "large";
+        require(argc <= 1 || bench || large || std::string(argv[1]) == "regression", "unknown mode");
+        int bits = argc > 2 ? std::stoi(argv[2]) : (large ? 20 : 12);
         int warmups = argc > 3 ? std::stoi(argv[3]) : 5;
         int repetitions = argc > 4 ? std::stoi(argv[4]) : 30;
-        require(bits >= 12 && bits <= (bench ? 30 : 20) && warmups >= 0 && repetitions > 0,
-                "arguments: regression|benchmark qubits warmups repetitions (regression qubits <=20)");
+        require(bits >= 12 && bits <= (bench ? 30 : (large ? 26 : 20)) && warmups >= 0 && repetitions > 0,
+                "arguments: regression|large|benchmark qubits warmups repetitions (regression <=20, large <=26)");
         require(c.num_procs > 0 && !(c.num_procs & (c.num_procs - 1)), "power-of-two ranks required");
         require(bits - c.log_num_procs >= 8, "SWAP4 requires at least eight local qubits");
         qcs_simulator_set_num_qubits_cxx(sim, bits);
         qcs_simulator_allocate_memory_cxx(sim);
-        if (bench) benchmark(sim, warmups, repetitions); else regression(sim);
+        if (bench) benchmark(sim, warmups, repetitions);
+        else if (large) large_regression(sim);
+        else
+        {
+            regression(sim);
+#ifdef QCS_SWAP_LAUNCH_HPP
+            // Keep the same numerical/measurement/MPI matrix, but force many
+            // launches and non-power-of-two blocks with a partial final block.
+            auto const original = c.swap_launch_config;
+            c.swap_launch_config = qcs::swap_detail::launch_limits(37,
+                original.threads, original.threads, original.threads,
+                std::min<unsigned int>(3, original.blocks));
+            regression(sim);
+            // Fix all local bits except the two targets: only four ordinals,
+            // even when the allocated vector is much larger than one block.
+            c.swap_launch_config = original;
+            c.initial_perm_p2l.resize(c.num_qubits);
+            std::iota(c.initial_perm_p2l.begin(), c.initial_perm_p2l.end(), 0);
+            auto expected = initial(c, 0, 0);
+            load(c, expected);
+            qubits t{0, 1}, n, p;
+            for (int q = 2; q < c.num_qubits_local; ++q)
+                (q % 2 ? p : n).push_back(q);
+            operate(sim, t, n, p, true);
+            reference_swap(expected, t, n, p);
+            check(c, expected);
+            if (!c.proc_num) std::cout << "SWAP small-work regression passed\n";
+#endif
+        }
         qcs_simulator_destroy_cxx(sim);
         return 0;
     }

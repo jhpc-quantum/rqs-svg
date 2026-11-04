@@ -50,6 +50,7 @@
 #include <qcs.h>
 #include "measurement_reduce.cuh"
 #include "work_buffer.cuh"
+#include "swap_launch.hpp"
 
 namespace qcs
 {
@@ -942,38 +943,36 @@ namespace qcs
         }
     }
 
-    __global__ void cuda_swap(uint64_t num_threads)
+    __global__ void cuda_swap(uint64_t num_threads, uint64_t ordinal_offset)
     {
+        uint64_t ordinal = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+        if (ordinal >= num_threads) return;
+        ordinal += ordinal_offset;
         auto const *const args = kernel_input_data();
         int const num_targets = args->num_target_qubits;
         int const *const targets = args->get_target_qubit_num_list();
         qcs::complex_t *const state = kernel_common_data().state_data_device;
-        uint64_t const first = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
-        uint64_t const stride = (uint64_t)gridDim.x * blockDim.x;
-        for (uint64_t ordinal = first; ordinal < num_threads; ordinal += stride)
+        // High ordinal bits enumerate non-operand qubits; controls are fixed
+        // by the shared index helper. Low bits enumerate the target states.
+        uint64_t index;
+        thread_num_to_state_index_q0(ordinal >> num_targets, index);
+        uint64_t partner = index;
+        #pragma unroll 1
+        for (int t = 0; t < num_targets; t += 2)
         {
-            // High ordinal bits enumerate non-operand qubits; controls are fixed
-            // by the shared index helper. Low bits enumerate the target states.
-            uint64_t index;
-            thread_num_to_state_index_q0(ordinal >> num_targets, index);
-            uint64_t partner = index;
-            #pragma unroll 1
-            for (int t = 0; t < num_targets; t += 2)
-            {
-                uint64_t const a = (ordinal >> t) & 1;
-                uint64_t const b = (ordinal >> (t + 1)) & 1;
-                index |= (a << targets[t]) | (b << targets[t + 1]);
-                partner |= (b << targets[t]) | (a << targets[t + 1]);
-            }
-            // Disjoint SWAPs form an involution. Only the lower index owns each
-            // two-element cycle; fixed points never access amplitude memory.
-            if (index < partner)
-            {
-                auto const value = state[index];
-                auto const partner_value = state[partner];
-                state[index] = partner_value;
-                state[partner] = value;
-            }
+            uint64_t const a = (ordinal >> t) & 1;
+            uint64_t const b = (ordinal >> (t + 1)) & 1;
+            index |= (a << targets[t]) | (b << targets[t + 1]);
+            partner |= (b << targets[t]) | (a << targets[t + 1]);
+        }
+        // Disjoint SWAPs form an involution. Only the lower index owns each
+        // two-element cycle; fixed points never access amplitude memory.
+        if (index < partner)
+        {
+            auto const value = state[index];
+            auto const partner_value = state[partner];
+            state[index] = partner_value;
+            state[partner] = value;
         }
     }
 
@@ -1133,6 +1132,7 @@ namespace qcs
         uint64_t initial_free_memory_bytes;
         int log_block_size_max;
         int block_size_max;
+        swap_detail::launch_limits swap_launch_config{1, 1, 1, 1, 1};
         int target_qubit_num_begin;
         int target_qubit_num_end;
 
@@ -1325,6 +1325,16 @@ namespace qcs
             }
 
             block_size_max = 1 << log_block_size_max;
+
+            cudaDeviceProp swap_device_properties{};
+            ATLC_CHECK_CUDA(cudaGetDeviceProperties, &swap_device_properties, gpu_id);
+            cudaFuncAttributes swap_kernel_properties{};
+            ATLC_CHECK_CUDA(cudaFuncGetAttributes, &swap_kernel_properties, cuda_swap);
+            swap_launch_config = swap_detail::launch_limits(block_size_max,
+                swap_device_properties.maxThreadsPerBlock,
+                swap_device_properties.maxThreadsDim[0],
+                swap_kernel_properties.maxThreadsPerBlock,
+                swap_device_properties.maxGridSize[0]);
 
             if constexpr (use_global_memory_for_constants)
             {
@@ -2569,9 +2579,13 @@ namespace qcs
                 int const num_controls = negative_control_qubit_num_physical_local_list.size() +
                                          positive_control_qubit_num_physical_local_list.size();
                 uint64_t const num_threads = num_states_local >> num_controls;
-                uint64_t const block_size = std::min<uint64_t>(block_size_max, num_threads);
-                uint64_t const num_blocks = std::min<uint64_t>((num_threads + block_size - 1) / block_size, 65535);
-                ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_swap, num_blocks, block_size, 0, stream, num_threads);
+                for (uint64_t offset = 0; offset < num_threads; )
+                {
+                    auto const launch = swap_launch_config.next(num_threads, offset);
+                    ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_swap, launch.blocks, launch.threads,
+                        0, stream, launch.count, launch.offset);
+                    offset += launch.count;
+                }
             }
             finish_gate_operation(release_mask);
         }

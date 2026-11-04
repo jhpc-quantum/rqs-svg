@@ -38,7 +38,7 @@ $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQC
 	mkdir -p $(dir $@)
 	$(CXX) $(INCLUDE) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
-$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
+$(LIBQCS_SO): src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh src/swap_launch.hpp include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) -fPIC -shared src/qcs.cu -o $@ $(NVCC_LDFLAGS)
 
