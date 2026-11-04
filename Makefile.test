@@ -72,7 +72,7 @@ test-measurement-metadata: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_te
 	$(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS) regression 12
 
 # Build only; run explicitly under the target cluster's MPI launcher.
-NCCL_BUFFER_HARNESS ?= bin/nccl-buffer-$(NCCL_BUFFER_MODE)-graph-$(NCCL_GRAPH_MODE)
+NCCL_BUFFER_HARNESS ?= bin/nccl-buffer-$(NCCL_BUFFER_MODE)
 $(NCCL_BUFFER_HARNESS): tests/nccl_buffer_harness.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)

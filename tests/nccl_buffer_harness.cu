@@ -47,7 +47,6 @@ int main(int argc, char** argv)
         const int repetitions = argc > 3 ? std::stoi(argv[3]) : 30;
         if (local_bits < 2 || local_bits > 20 || !cap || repetitions <= 0)
             throw std::runtime_error("arguments: local_bits [2,20], slot-total cap > 0, repetitions > 0");
-        c.profile_graph_first_launch = true;
         const int bits = local_bits + c.log_num_procs;
         qcs_simulator_set_num_qubits_cxx(sim, bits);
         for (int cycle = 0; cycle < 3; ++cycle)
@@ -88,17 +87,17 @@ int main(int argc, char** argv)
                     reference[i] = before[j];
                 }
                 check(c, reference);
-                // Replay repeatedly; every pair restores the original state.
-                for (int replay = 0; replay < 7; ++replay)
+                // Repeat exchanges; every pair restores the original state.
+                for (int repeat = 0; repeat < 7; ++repeat)
                 {
                     c.exchange_qubits();
-                    if (!(replay & 1)) check(c, before);
+                    if (!(repeat & 1)) check(c, before);
                     else check(c, reference);
                 }
                 reference = before;
             }
-            // Change capacity within the allocated region to invalidate offsets
-            // and lengths, then restore it. Oracle state is unchanged after pairs.
+            // Exercise different chunk offsets and lengths within the allocation,
+            // then restore capacity. Oracle state is unchanged after pairs.
             uint64_t saved_cap = c.swap_buffer_total_length;
             for (uint64_t changed : {UINT64_C(1), saved_cap})
             {
@@ -147,15 +146,9 @@ int main(int argc, char** argv)
             for (int rep = 0; rep < repetitions; ++rep) c.exchange_qubits();
             finish(c); // Includes copy-back on the independent stream.
             double elapsed = maximum(MPI_Wtime() - begin);
-            double setup = maximum(c.exchange_graph_setup_seconds);
-            double capture = maximum(c.exchange_capture_seconds);
-            double instantiate = maximum(c.exchange_instantiate_seconds);
-            double first = maximum(c.exchange_first_launch_seconds);
-            if (!c.proc_num) printf("mode=%d graph=%d cycle=%d initialization_s=%.9f allocation_s=%.9f registration_s=%.9f graph_setup_s=%.9f capture_s=%.9f instantiate_s=%.9f first_launch_s=%.9f exchange_s=%.9f builds=%llu replays=%llu repetitions=%d cap=%llu\n",
-                qcs::nccl_buffer_mode, qcs::nccl_graph_mode, cycle, initialization, allocation, registration,
-                setup, capture, instantiate, first, elapsed / repetitions,
-                static_cast<unsigned long long>(c.exchange_graph_builds),
-                static_cast<unsigned long long>(c.exchange_graph_replays), repetitions,
+            if (!c.proc_num) printf("mode=%d cycle=%d initialization_s=%.9f allocation_s=%.9f registration_s=%.9f exchange_s=%.9f repetitions=%d cap=%llu\n",
+                qcs::nccl_buffer_mode, cycle, initialization, allocation, registration,
+                elapsed / repetitions, repetitions,
                 static_cast<unsigned long long>(c.swap_buffer_total_length));
             c.free_memory();
         }

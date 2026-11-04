@@ -379,7 +379,7 @@ six methods, deferred file loading, invalid enum rejection, explicit initializat
 after legacy default allocation, and restoration after repeated measurements. Run it with one MPI rank on a CUDA/MPI/NCCL system.
 
 
-Optional NCCL exchange experiments: [explicit buffer registration](docs/nccl-buffer-registration.md) and [CUDA Graph execution/registration](docs/nccl-cuda-graphs.md). Both are disabled by default.
+NCCL exchange uses CUDA streams with pipelined copy-back. Optional [explicit buffer registration](docs/nccl-buffer-registration.md) is disabled by default.
 
 ## Acknowledgments
 
