@@ -1,5 +1,7 @@
 # Explicit NCCL buffer registration
 
+[README](../README.md) · [Building](building.md) · [Exchange configuration](advanced-configuration.md#exchange-copy-back-pipeline)
+
 NCCL exchanges use CUDA streams, with a separate stream for pipelined copy-back.
 
 Build-time `NCCL_BUFFER_MODE` selects the experiment (default `0`):

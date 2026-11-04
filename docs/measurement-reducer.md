@@ -1,5 +1,7 @@
 # Measurement reducer and reproducible validation
 
+[README](../README.md) · [Usage and API](usage.md) · [Advanced configuration](advanced-configuration.md)
+
 Production measurement uses the custom shared-memory, bin-major two-stage
 reducer in `src/measurement_reduce.cuh`. CUB is used for the subsequent
 small cumulative scan, rather than state-vector reduction.
@@ -8,6 +10,20 @@ qubits. The actual pre-migration baseline recorded before task 1 and the reviewe
 baseline are both `1ce55aff510934fd1502abf933e8c26a1db79133`.
 The reducer was introduced in `2d15882` and integrated in `7f12af8`.
 Comparison runs record the full current and baseline revisions in `manifest.json`.
+
+## Grouped measurement behavior
+
+The [public measurement API](usage.md#measuring-multiple-qubits) accepts ordered
+logical targets. `measure_group_size` near the top of `src/qcs.cu` selects widths
+1–4, with a maximum and default of four; a remainder is measured together as a
+smaller group. Edit the constant and rebuild to change the width.
+
+Global-only targets use rank bits without exchanging amplitudes or changing the
+mapping. Already measured targets retain recorded values, and entirely cached
+groups need no collective or draw. Projection remains deferred until a gate or
+statevector output requires it. Unsorted targets and logical-to-physical mappings
+retain caller-order output positions; the first target is the least significant
+bit of the internal joint outcome.
 
 ## Algorithm and ownership
 
@@ -33,9 +49,9 @@ occupancy are checked when reserving workspace (at simulator allocation time,
 or on first use for the standalone owning workspace). There is no fallback or measured tuning.
 
 Each simulator owns one device/stream-bound measurement workspace borrowing a
-fixed slice of the shared work buffer. After state allocation, the work buffer
-reserves 95% of remaining CUDA memory. The measurement slice is sized once for
-the largest requirement across N=1..4, before the swap slice is carved out;
+fixed slice of the [shared work buffer](advanced-configuration.md#device-work-buffer).
+The measurement slice is sized once for the largest requirement across N=1..4,
+before the swap slice is carved out;
 measurements do not grow or allocate storage. All used elements are overwritten.
 The standalone reducer test also supports an owning workspace that grows on
 demand. `enqueue` launches both stages
@@ -120,7 +136,19 @@ The old `std::mt19937_64` measurement sequence is intentionally not preserved.
 
 ## Regression harnesses
 
-Use the production vendor include/link/compiler flags, including MPI, NCCL,
+Quick checks on a configured CUDA/MPI machine, from the repository root:
+
+```sh
+make target sharedlibrary
+make test-measurement-reduce
+make test-measurement-integration
+make test-measurement-distributed RANKS=1
+make test-measurement-distributed RANKS=2
+make test-measurement-distributed RANKS=4
+mpiexec -n 2 ./bin/measurement_integration_test
+```
+
+For extended regression, metadata variants, and multi-node launches, use the production vendor include/link/compiler flags, including MPI, NCCL,
 cuRAND and atlc. One GPU per rank is required; initialization assigns GPUs by
 node-local MPI rank. Run from the repository root:
 
@@ -130,9 +158,6 @@ make sharedlibrary bin/measurement_reduce_test bin/measurement_integration_test
 mpiexec -n 1 ./bin/measurement_integration_test
 mpiexec -n 2 ./bin/measurement_integration_test
 mpiexec -n 4 ./bin/measurement_integration_test
-make test-measurement-distributed RANKS=1
-make test-measurement-distributed RANKS=2
-make test-measurement-distributed RANKS=4
 make test-measurement-metadata RANKS=2 MEASUREMENT_METADATA=constant
 make test-measurement-metadata RANKS=2 MEASUREMENT_METADATA=global
 # Repeat metadata variants with RANKS=1 and RANKS=4 where available.
