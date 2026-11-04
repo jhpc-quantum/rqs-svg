@@ -2,8 +2,31 @@
 
 [README](../README.md) · [Building](building.md) · [Usage and API](usage.md) · [Advanced configuration](advanced-configuration.md)
 
-These settings require rebuilding. See [Building](building.md) for vendor flags
+Compile-time settings require rebuilding. See [Building](building.md) for vendor flags
 and runtime library setup; all shell commands assume the repository root.
+
+## NCCL environment defaults
+
+Before any NCCL initialization, the simulator sets these defaults on every MPI
+rank when the corresponding environment variable is unset or empty:
+
+- `NCCL_NCHANNELS_PER_NET_PEER=8`
+- `NCCL_P2P_NET_CHUNKSIZE=262144`
+
+These are configurable performance-tuning defaults; they are not universally
+optimal. Non-empty values are preserved. To override them without rebuilding,
+export your preferred values before launching, for example:
+
+```bash
+export NCCL_NCHANNELS_PER_NET_PEER=4
+export NCCL_P2P_NET_CHUNKSIZE=131072
+mpirun -np 2 ./bin/qcs circuit.so
+```
+
+Ensure your MPI launcher propagates these variables to every rank. A failure to
+set any default is checked collectively, so all ranks stop before NCCL
+initialization. The mode-specific `NCCL_PXN_DISABLE` handling described below
+uses the same collective check.
 
 ## Storage for kernel constants
 

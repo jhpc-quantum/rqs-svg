@@ -1237,17 +1237,24 @@ namespace qcs
             ATLC_CHECK_MPI(MPI_Allreduce, &local_mode, &max_mode, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
             if (min_mode != max_mode) throw std::runtime_error("NCCL buffer mode differs across ranks");
             int environment_ok = 1;
+            const auto set_environment_default = [&environment_ok](const char* name, const char* value)
+            {
+                const char* current = std::getenv(name);
+                if ((!current || !*current) && setenv(name, value, 1) != 0)
+                    environment_ok = 0;
+            };
+            // Configurable performance defaults; preserve non-empty user overrides.
+            set_environment_default("NCCL_NCHANNELS_PER_NET_PEER", "8");
+            set_environment_default("NCCL_P2P_NET_CHUNKSIZE", "262144");
             if constexpr (nccl_buffer_mode == 2)
             {
-                const char* pxn = std::getenv("NCCL_PXN_DISABLE");
-                if (!pxn || !*pxn)
-                    environment_ok = setenv("NCCL_PXN_DISABLE", "1", 1) == 0;
+                set_environment_default("NCCL_PXN_DISABLE", "1");
             }
             // A local setenv failure must not strand peers in the validation collective.
             int all_environment_ok = 0;
             ATLC_CHECK_MPI(MPI_Allreduce, &environment_ok, &all_environment_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             if (!all_environment_ok) throw std::runtime_error(
-                "Failed to set NCCL_PXN_DISABLE=1 on one or more ranks");
+                "Failed to set NCCL environment defaults on one or more ranks");
             int version = 0;
             ATLC_CHECK_NCCL(ncclGetVersion, &version);
             const char* pxn = std::getenv("NCCL_PXN_DISABLE");
