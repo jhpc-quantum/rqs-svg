@@ -83,3 +83,18 @@ nccl-buffer-harness: $(NCCL_BUFFER_HARNESS)
 # Include every test and harness binary in the main clean target.
 TEST_BINARIES = $(MEASUREMENT_REDUCE_TEST) $(MEASUREMENT_INTEGRATION_TEST) $(WORK_BUFFER_TEST) $(INITIAL_STATE_TEST) \
 	$(MEASUREMENT_HARNESS) $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test $(NCCL_BUFFER_HARNESS)
+
+# Standalone translation unit using private amplitude access; production is unchanged.
+SWAP_HARNESS ?= bin/swap_harness
+$(SWAP_HARNESS): tests/swap_harness.cu src/qcs.cu src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: swap-harness test-swap benchmark-swap
+swap-harness: $(SWAP_HARNESS)
+test-swap: $(SWAP_HARNESS)
+	$(MPIEXEC) -n $(RANKS) $(abspath $(SWAP_HARNESS)) regression 12
+benchmark-swap: $(SWAP_HARNESS)
+	$(MPIEXEC) -n $(RANKS) $(abspath $(SWAP_HARNESS)) benchmark $(BENCH_QUBITS) $(BENCH_WARMUPS) $(BENCH_REPETITIONS)
+
+TEST_BINARIES += $(SWAP_HARNESS)
