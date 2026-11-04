@@ -32,6 +32,15 @@ Then, `make` will build `bin/qcs`.
 make
 ```
 
+The default `NCCL_BUFFER_MODE=2` uses NCCL allocation and explicit registration.
+It requires NCCL headers and runtime >= 2.31.2 and NCCL exchange (`NVSHMEM=0`).
+Setup automatically sets `NCCL_PXN_DISABLE=1` if unset or empty; explicit non-empty
+values are preserved and must equal `1`. To select CUDA allocation or NCCL
+allocation without registration, use `make -B NCCL_BUFFER_MODE=0` or
+`make -B NCCL_BUFFER_MODE=1`, respectively. Force a rebuild when changing modes.
+See [NCCL buffer registration](nccl-buffer-registration.md) for compatibility
+restrictions and validation.
+
 ## Runtime library search path
 
 By default, `bin/qcs` embeds the absolute directory containing `libqcs.so`

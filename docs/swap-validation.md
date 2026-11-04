@@ -101,8 +101,9 @@ python3 scripts/compare_swap.py --output /tmp/swap-comparison-r4 \
 ```
 
 Omit `--nvcc-time` if that NVCC version does not support `--time`. Use
-`--make-arg 'GENCODE_FLAGS=...'`, `--make-arg 'NVSHMEM=1'`, and other make assignments
-as needed; every assignment is applied identically to both variants. Disable
+`--make-arg 'GENCODE_FLAGS=...'` and other make assignments as needed. NVSHMEM
+builds need both `--make-arg 'NVSHMEM=1'` and `--make-arg 'NCCL_BUFFER_MODE=0'`;
+every assignment is applied identically to both variants. Disable
 compiler caches in the supplied compiler command/environment. Use fixed GPU clocks
 and an otherwise idle machine when comparing runtime. Review `config.mk` for
 external cache wrappers. The driver forces serial rebuilds with `make -B -j1`,

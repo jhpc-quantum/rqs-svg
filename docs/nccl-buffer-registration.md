@@ -4,7 +4,7 @@
 
 NCCL exchanges use CUDA streams, with a separate stream for pipelined copy-back.
 
-Build-time `NCCL_BUFFER_MODE` selects the experiment (default `0`):
+Build-time `NCCL_BUFFER_MODE` selects buffer allocation and registration (default `2`):
 
 | Mode | State and scratch allocations | Explicit registration |
 | --- | --- | --- |
@@ -14,8 +14,12 @@ Build-time `NCCL_BUFFER_MODE` selects the experiment (default `0`):
 
 Modes 1 and 2 require NCCL headers and runtime >= 2.31.2, NCCL exchange
 (`NVSHMEM=0`), and device memory rather than managed memory. Mode 2 additionally
-requires `NCCL_PXN_DISABLE=1` on every rank. Unsupported or inconsistent settings
-are rejected collectively. Allocation is a collective application operation:
+requires `NCCL_PXN_DISABLE=1` on every rank. Before communicator initialization,
+mode 2 automatically sets it to `1` if it is unset or empty. Explicit non-empty
+values are preserved exactly; values other than `1` are rejected by validation.
+Modes 0 and 1 leave the variable unchanged. Failure to set the variable on any
+rank causes setup to fail collectively before communicator initialization.
+Unsupported or inconsistent settings are rejected collectively. Allocation is a collective application operation:
 every rank must enter it in the same order. An existing allocation must be freed
 before reallocation; rejected repeated allocation preserves the existing state.
 Changing a Make variable does not invalidate an existing binary: force rebuilds
@@ -49,8 +53,12 @@ flags, and NCCL paths. Ensure both compilation and runtime resolve NCCL 2.31.2.
 For a production binary, for example:
 
 ```sh
-make -B NVSHMEM=0 NCCL_BUFFER_MODE=2 sharedlibrary target
+make -B NVSHMEM=0 sharedlibrary target  # NCCL_BUFFER_MODE=2 is the default
 ```
+
+To use the original CUDA allocators, build with `make -B NCCL_BUFFER_MODE=0`.
+For NCCL allocation without explicit registration, use `make -B NCCL_BUFFER_MODE=1`.
+NVSHMEM builds require `NCCL_BUFFER_MODE=0`; no automatic fallback is performed.
 
 Build all three standalone harnesses with identical compiler/vendor flags:
 
@@ -112,8 +120,12 @@ three elements per slot and a short final chunk for a 512-element region; 512
 exercises an exact division. Low-bit exchanges also exercise one-element regions.
 Run fresh MPI jobs repeatedly for complete setup/run/dispose cycles: MPI cannot
 be initialized again after finalization within the same process. On the cluster,
-also check rejection of mode 2 without PXN disabled, mixed mode binaries via the
-MPI launcher's MPMD syntax, managed-memory requests, and allocation pressure on
+also check mode 2 with `NCCL_PXN_DISABLE` unset and empty (both must succeed),
+and with explicit `0` or another incompatible non-empty value (must be preserved
+and rejected on every rank, including when only one rank has that value). Check
+that modes 0/1 leave unset, empty, and non-empty values unchanged. Check mixed
+mode binaries via the MPI launcher's MPMD syntax, managed-memory requests, and
+allocation pressure on
 one rank. Inject a registration failure on the second registration to exercise
 rollback of the first handle, then retry allocation on the surviving communicator.
 These failure cases require site-specific instrumentation and are not automated
@@ -142,8 +154,11 @@ actual transfer pointers/offsets and memory handles with the registered regions.
 Report registered NET use as unconfirmed if that evidence is unavailable. Disable
 diagnostic logging for timing runs, identically across modes.
 
-## Execution status
+## Host validation and execution status
 
-No tests, builds, validation commands, or benchmarks were run for this change,
-as requested. All cluster checks and all performance measurements remain pending.
-The provided harness is uncompiled and unrun. No performance gain is claimed.
+Run `python3 tests/test_nccl_buffer_setup.py` for host-only checks of the build
+defaults and setup environment handling, including simulated peer failures.
+These checks compile the production setup validation with MPI/NCCL stubs; they
+do not exercise real collectives, NCCL communicators, or GPU allocation.
+Cluster checks and performance measurements remain pending. No performance gain
+is claimed.

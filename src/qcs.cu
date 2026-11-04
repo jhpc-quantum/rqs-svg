@@ -1236,6 +1236,18 @@ namespace qcs
             ATLC_CHECK_MPI(MPI_Allreduce, &local_mode, &min_mode, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             ATLC_CHECK_MPI(MPI_Allreduce, &local_mode, &max_mode, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
             if (min_mode != max_mode) throw std::runtime_error("NCCL buffer mode differs across ranks");
+            int environment_ok = 1;
+            if constexpr (nccl_buffer_mode == 2)
+            {
+                const char* pxn = std::getenv("NCCL_PXN_DISABLE");
+                if (!pxn || !*pxn)
+                    environment_ok = setenv("NCCL_PXN_DISABLE", "1", 1) == 0;
+            }
+            // A local setenv failure must not strand peers in the validation collective.
+            int all_environment_ok = 0;
+            ATLC_CHECK_MPI(MPI_Allreduce, &environment_ok, &all_environment_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            if (!all_environment_ok) throw std::runtime_error(
+                "Failed to set NCCL_PXN_DISABLE=1 on one or more ranks");
             int version = 0;
             ATLC_CHECK_NCCL(ncclGetVersion, &version);
             const char* pxn = std::getenv("NCCL_PXN_DISABLE");

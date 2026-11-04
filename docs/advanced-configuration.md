@@ -46,7 +46,7 @@ buffer isolation and measurement correctness.
 ## Optional NVSHMEM exchange
 
 NVSHMEM is disabled by default. Build with
-`make clean && make NVSHMEM=1 NVSHMEM_HOME=/path/to/nvshmem` to enable it.
+`make clean && make NVSHMEM=1 NCCL_BUFFER_MODE=0 NVSHMEM_HOME=/path/to/nvshmem` to enable it.
 This defines `QCS_ENABLE_NVSHMEM`, which automatically sets
 `exchange_nvshmem_registered_put` in `src/qcs.cu` to `true` and selects
 NVSHMEM registered-PUT exchange. When the macro is not defined, the constant
@@ -143,6 +143,13 @@ Edit these constants and run `make` to rebuild the simulator, or run
 ## Explicit NCCL buffer registration
 
 The default NCCL exchange uses CUDA streams with pipelined copy-back.
-Optional [explicit buffer registration](nccl-buffer-registration.md) is disabled
-by default (`NCCL_BUFFER_MODE=0`); that guide covers modes, requirements,
-allocation lifecycle, and the cluster harness.
+[Explicit buffer registration](nccl-buffer-registration.md) is enabled by default
+(`NCCL_BUFFER_MODE=2`), using `ncclMemAlloc` and `ncclCommRegister`. It requires
+NCCL headers and runtime >= 2.31.2, NCCL exchange (`NVSHMEM=0`), and device memory.
+Before communicator initialization, mode 2 sets `NCCL_PXN_DISABLE=1` when unset
+or empty. Non-empty values are never overwritten and must equal `1` to pass
+collective validation. Modes 0 and 1 leave the environment variable unchanged.
+Use `make -B NCCL_BUFFER_MODE=0` for CUDA allocation or
+`make -B NCCL_BUFFER_MODE=1` for NCCL allocation without registration. Force a
+rebuild when switching modes; changing the Make variable alone does not rebuild
+existing binaries. See the guide for allocation lifecycle and the cluster harness.

@@ -5,7 +5,7 @@
 #include <string>
 
 #ifndef QCS_NCCL_BUFFER_MODE
-#define QCS_NCCL_BUFFER_MODE 0
+#define QCS_NCCL_BUFFER_MODE 2
 #endif
 
 namespace qcs {

@@ -5,7 +5,7 @@ CXX ?= g++
 INCLUDE ?= -I./include
 NVCC_CFLAGS = $(CFLAGS_VENDOR) -Wformat=2 $(INCLUDE) -O3 -rdynamic -std=c++17 -Wno-deprecated-gpu-targets $(GENCODE_FLAGS)
 # 0 = baseline, 1 = ncclMemAlloc only, 2 = ncclMemAlloc + ncclCommRegister.
-NCCL_BUFFER_MODE ?= 0
+NCCL_BUFFER_MODE ?= 2
 NVCC_CFLAGS += -DQCS_NCCL_BUFFER_MODE=$(NCCL_BUFFER_MODE)
 NVCC_LDFLAGS = $(LDFLAGS_VENDOR) -L./lib $(LDLIBS) --cudart=shared
 # Set NVSHMEM=1 to enable NVSHMEM registered-PUT exchange.
