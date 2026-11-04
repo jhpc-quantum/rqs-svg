@@ -942,6 +942,41 @@ namespace qcs
         }
     }
 
+    __global__ void cuda_swap(uint64_t num_threads)
+    {
+        auto const *const args = kernel_input_data();
+        int const num_targets = args->num_target_qubits;
+        int const *const targets = args->get_target_qubit_num_list();
+        qcs::complex_t *const state = kernel_common_data().state_data_device;
+        uint64_t const first = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+        uint64_t const stride = (uint64_t)gridDim.x * blockDim.x;
+        for (uint64_t ordinal = first; ordinal < num_threads; ordinal += stride)
+        {
+            // High ordinal bits enumerate non-operand qubits; controls are fixed
+            // by the shared index helper. Low bits enumerate the target states.
+            uint64_t index;
+            thread_num_to_state_index_q0(ordinal >> num_targets, index);
+            uint64_t partner = index;
+            #pragma unroll 1
+            for (int t = 0; t < num_targets; t += 2)
+            {
+                uint64_t const a = (ordinal >> t) & 1;
+                uint64_t const b = (ordinal >> (t + 1)) & 1;
+                index |= (a << targets[t]) | (b << targets[t + 1]);
+                partner |= (b << targets[t]) | (a << targets[t + 1]);
+            }
+            // Disjoint SWAPs form an involution. Only the lower index owns each
+            // two-element cycle; fixed points never access amplitude memory.
+            if (index < partner)
+            {
+                auto const value = state[index];
+                auto const partner_value = state[partner];
+                state[index] = partner_value;
+                state[partner] = value;
+            }
+        }
+    }
+
     template <typename GateType, int num_target_qubits = GateType::num_target_qubits>
     __global__ void cuda_gate(GateType const gateobj)
     {
@@ -2450,12 +2485,11 @@ namespace qcs
             }
         }
 
-        template <typename GateType>
-        void operate_gate(GateType gateobj, std::vector<int> target_qubit_num_logical_list_input, std::vector<int> negative_control_qubit_num_logical_list_input, std::vector<int> positive_control_qubit_num_logical_list_input)
+        bool prepare_gate_operation(std::vector<int> target_qubit_num_logical_list_input,
+                                    std::vector<int> negative_control_qubit_num_logical_list_input,
+                                    std::vector<int> positive_control_qubit_num_logical_list_input,
+                                    uint64_t &release_mask)
         {
-
-            assert(target_qubit_num_logical_list_input.size() == GateType::num_target_qubits);
-
             target_qubit_num_logical_list = std::move(target_qubit_num_logical_list_input);
             negative_control_qubit_num_logical_list = std::move(negative_control_qubit_num_logical_list_input);
             positive_control_qubit_num_logical_list = std::move(positive_control_qubit_num_logical_list_input);
@@ -2463,27 +2497,64 @@ namespace qcs
             uint64_t target_mask = 0;
             for (int const target : target_qubit_num_logical_list)
                 target_mask |= UINT64_C(1) << target;
-            uint64_t const release_mask = measured_mask_logical & target_mask;
+            release_mask = measured_mask_logical & target_mask;
 
             prepare_control_qubit_num_list();
             if (!measured_control_condition)
-                return;
+                return false;
 
             localize_target_qubits();
             materialize_pending_projection(release_mask);
             assert((pending_projection_mask_logical & target_mask) == 0);
             check_control_qubit_num_physical();
             prepare_operating_gate();
+            return true;
+        }
+
+        void finish_gate_operation(uint64_t release_mask)
+        {
+            update_measured_list();
+            measured_mask_logical &= ~release_mask;
+            measured_value_logical &= measured_mask_logical;
+            pending_projection_mask_logical &= measured_mask_logical;
+        }
+
+        template <typename GateType>
+        void operate_gate(GateType gateobj, std::vector<int> targets, std::vector<int> negctrls, std::vector<int> ctrls)
+        {
+            assert(targets.size() == GateType::num_target_qubits);
+            uint64_t release_mask;
+            if (!prepare_gate_operation(std::move(targets), std::move(negctrls), std::move(ctrls), release_mask))
+                return;
 
             if (proc_num_control_condition)
             {
                 ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj);
             }
+            finish_gate_operation(release_mask);
+        }
 
-            update_measured_list();
-            measured_mask_logical &= ~release_mask;
-            measured_value_logical &= measured_mask_logical;
-            pending_projection_mask_logical &= measured_mask_logical;
+        void operate_swap(std::vector<int> targets, std::vector<int> negctrls, std::vector<int> ctrls)
+        {
+            if (targets.empty() || targets.size() > 2 * qcs::gate::max_num_swaps || targets.size() % 2 != 0)
+                throw std::runtime_error("SWAP target count must be an even number from 2 through 2 * max_num_swaps");
+
+            uint64_t release_mask;
+            if (!prepare_gate_operation(std::move(targets), std::move(negctrls), std::move(ctrls), release_mask))
+                return;
+
+            if (proc_num_control_condition)
+            {
+                // Unlike cuda_gate, cuda_swap enumerates every target state as
+                // well as every non-operand state. Exclude only local controls.
+                int const num_controls = negative_control_qubit_num_physical_local_list.size() +
+                                         positive_control_qubit_num_physical_local_list.size();
+                uint64_t const num_threads = num_states_local >> num_controls;
+                uint64_t const block_size = std::min<uint64_t>(block_size_max, num_threads);
+                uint64_t const num_blocks = std::min<uint64_t>((num_threads + block_size - 1) / block_size, 65535);
+                ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_swap, num_blocks, block_size, 0, stream, num_threads);
+            }
+            finish_gate_operation(release_mask);
         }
 
 #if 0
@@ -2731,46 +2802,6 @@ static std::vector<int> qcs_vector_from_array(bit_num_t const *values, bit_num_t
         throw std::runtime_error("array pointer must not be NULL when element count is positive");
     }
     return std::vector<int>(values, values + count);
-}
-
-template <size_t swap_index>
-static bool qcs_simulator_try_operate_swap(
-    qcs_simulator *sim, bit_num_t target_qubit_num_count,
-    std::vector<int> const &targets,
-    std::vector<int> const &negctrls,
-    std::vector<int> const &ctrls)
-{
-    constexpr unsigned int num_swaps = swap_index + 1;
-    if (target_qubit_num_count != 2 * num_swaps)
-        return false;
-
-    sim->core->operate_gate(qcs::gate::swap<num_swaps>(), targets, negctrls, ctrls);
-    return true;
-}
-
-template <size_t... swap_indices>
-static bool qcs_simulator_try_operate_swap(
-    qcs_simulator *sim, bit_num_t target_qubit_num_count,
-    std::vector<int> const &targets,
-    std::vector<int> const &negctrls,
-    std::vector<int> const &ctrls,
-    std::index_sequence<swap_indices...>)
-{
-    return (qcs_simulator_try_operate_swap<swap_indices>(
-                sim, target_qubit_num_count, targets, negctrls, ctrls) || ...);
-}
-
-static void qcs_simulator_operate_swap(qcs_simulator *sim, bit_num_t target_qubit_num_count,
-                                       std::vector<int> const &targets,
-                                       std::vector<int> const &negctrls,
-                                       std::vector<int> const &ctrls)
-{
-    if (!qcs_simulator_try_operate_swap(
-            sim, target_qubit_num_count, targets, negctrls, ctrls,
-            std::make_index_sequence<qcs::gate::max_num_swaps>{}))
-    {
-        throw std::runtime_error("SWAP target count must be an even number from 2 through 2 * max_num_swaps");
-    }
 }
 
 static void qcs_simulator_init(qcs_simulator *sim)
@@ -3022,7 +3053,7 @@ void qcs_simulator_gate_swap_cxx(qcs_simulator *sim, bit_num_t const *target_qub
     auto const targets = qcs_vector_from_array(target_qubit_num_list, target_qubit_num_count);
     auto const negctrls = qcs_vector_from_array(negctrl_qubit_num_list, negctrl_qubit_num_count);
     auto const ctrls = qcs_vector_from_array(ctrl_qubit_num_list, ctrl_qubit_num_count);
-    qcs_simulator_operate_swap(sim, target_qubit_num_count, targets, negctrls, ctrls);
+    sim->core->operate_swap(targets, negctrls, ctrls);
 }
 
 void qcs_simulator_gate_iswap_cxx(qcs_simulator *sim, bit_num_t const *target_qubit_num_list, bit_num_t target_qubit_num_count, bit_num_t const *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, bit_num_t const *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count)
