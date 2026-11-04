@@ -146,4 +146,3 @@ The default NCCL exchange uses CUDA streams with pipelined copy-back.
 Optional [explicit buffer registration](nccl-buffer-registration.md) is disabled
 by default (`NCCL_BUFFER_MODE=0`); that guide covers modes, requirements,
 allocation lifecycle, and the cluster harness.
-
