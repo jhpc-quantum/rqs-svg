@@ -1,7 +1,8 @@
 # Pauli string expectation contract
 
-The host-side input contract and CPU tests are implemented. GPU reduction,
-localization integration, and public expectation functions are future work.
+The host-side input contract, standalone two-stage CUDA reducer, and CPU/GPU
+test sources are implemented. Workspace ownership, localization integration,
+and public expectation functions are future work.
 The operator enum is available in [`qcs.h`](../include/qcs.h); internal helpers
 are in [`pauli_string.hpp`](../src/pauli_string.hpp).
 
@@ -78,3 +79,48 @@ Y phases, Bell/GHZ states, and non-contiguous targets. The comparison uses
 The CPU oracle's full-vector temporary storage is test-only; it is not a
 proposal for GPU workspace allocation. These host tests do not establish GPU
 accuracy, distributed behavior, or performance.
+
+## Standalone CUDA reduction
+
+[`pauli_reduce.cuh`](../src/pauli_reduce.cuh) reuses the measurement reducer's
+256-thread block sum and amplitude type. Stage 1 uses grid-stride loops and
+`min(4 * SM_count, ceil(work_items / 256))` blocks, where work items are all
+amplitudes for diagonal strings and half the dimension for paired strings.
+The paired specialization inserts a zero at the highest flip bit, reads two
+amplitudes once, and accumulates twice the required real contribution. Y-phase
+selection is uniform across a launch. There is no `i < j` test.
+
+Stage 2 launches one 256-thread block and takes an explicit partial count.
+Each thread can accumulate multiple partials before the common block sum.
+The coefficient is deliberately excluded from the returned scalar for later
+application after NCCL AllReduce.
+
+`enqueue` borrows a caller-owned device buffer of at least `blocks + 1` doubles.
+It writes partials at the start and returns the last buffer element as the
+output slot. No allocation or stream synchronization occurs. State and scratch
+must be disjoint, on the current device, and alive until stream completion.
+Calls sharing scratch must be serialized on the same stream. Device/kernel
+resource limits are checked at launch; caching these checks and enforcing
+workspace ownership belong to the next integration step.
+
+On a configured CUDA machine, run:
+
+```sh
+make test-pauli-reduce
+make test-measurement-reduce
+compute-sanitizer --error-exitcode 1 --tool memcheck ./bin/pauli_reduce_test
+compute-sanitizer --error-exitcode 1 --tool racecheck ./bin/pauli_reduce_test
+compute-sanitizer --error-exitcode 1 --tool synccheck ./bin/pauli_reduce_test
+```
+
+The standalone CUDA test compares against the matrix oracle with
+`abs(error) <= 1e-12 + 5e-12 * abs(reference)`. It covers exhaustive strings
+through four qubits, random strings, signed Y eigenstates, Bell/GHZ states,
+non-contiguous masks, low/middle/high pivots, dimensions down to one amplitude,
+large domains, scratch poisoning/reuse/guards, invalid descriptors, and a
+1025-partial Stage 2 case. Non-unit coefficients verify that the reducer leaves
+coefficient application to its caller.
+
+CUDA tools were absent from PATH during implementation, so the CUDA source and
+test have not been compiled or executed. GPU numerical accuracy, sanitizer
+results, and measurement regression results remain unverified.

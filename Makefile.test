@@ -125,3 +125,14 @@ test-pauli-string: $(PAULI_STRING_TEST)
 	$(PAULI_STRING_TEST)
 
 TEST_BINARIES += $(PAULI_STRING_TEST)
+
+PAULI_REDUCE_TEST ?= bin/pauli_reduce_test
+$(PAULI_REDUCE_TEST): tests/pauli_reduce_test.cu tests/pauli_reference.hpp src/pauli_reduce.cuh src/pauli_string.hpp include/qcs.h src/measurement_reduce.cuh src/work_buffer.hpp
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(LDFLAGS_VENDOR) --cudart=shared
+
+.PHONY: test-pauli-reduce
+test-pauli-reduce: $(PAULI_REDUCE_TEST)
+	$(PAULI_REDUCE_TEST)
+
+TEST_BINARIES += $(PAULI_REDUCE_TEST)
