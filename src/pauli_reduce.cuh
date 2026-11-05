@@ -159,7 +159,7 @@ public:
 // alive until the stream completes. Calls sharing storage must be serialized on
 // that stream. Every used element is overwritten; no allocation or sync occurs.
 // Return a fixed output slot, valid until reuse. The result excludes coefficient;
-// the future simulator API applies it once after NCCL AllReduce.
+// the simulator applies it once after NCCL AllReduce.
 inline double* enqueue(const state_type* state, uint64_t local_dim,
                        const PauliStringDescriptor& d, double* workspace,
                        uint64_t capacity, cudaStream_t stream)

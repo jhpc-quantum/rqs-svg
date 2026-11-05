@@ -4,8 +4,8 @@
 
 All commands assume the repository root and a configured [build](building.md).
 
-The [Pauli expectation contract](pauli-expectation.md) describes the host helpers
-and tests being prepared for a future GPU expectation API.
+Use the [Pauli expectation API](pauli-expectation.md#public-api) to calculate
+a single Pauli string expectation value on the GPU.
 
 ## Compiling a circuit
 

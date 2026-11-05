@@ -147,3 +147,19 @@ test-pauli-core: $(PAULI_CORE_TEST)
 	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_CORE_TEST))
 
 TEST_BINARIES += $(PAULI_CORE_TEST)
+
+PAULI_API_TEST ?= bin/pauli_api_test
+PAULI_API_C_OBJECT ?= bin/pauli_api_c.o
+$(PAULI_API_C_OBJECT): tests/pauli_api_c.c include/qcs.h
+	mkdir -p $(dir $@)
+	$(CC) -std=c11 -Wall -Wextra -Werror $(INCLUDE) -c $< -o $@
+
+$(PAULI_API_TEST): tests/pauli_api_test.cpp $(PAULI_API_C_OBJECT) include/qcs.h $(LIBQCS_SO)
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $(INCLUDE) $< $(PAULI_API_C_OBJECT) -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
+
+.PHONY: test-pauli-api
+test-pauli-api: $(PAULI_API_TEST)
+	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_API_TEST))
+
+TEST_BINARIES += $(PAULI_API_TEST) $(PAULI_API_C_OBJECT)

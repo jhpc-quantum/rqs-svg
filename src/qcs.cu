@@ -3022,6 +3022,16 @@ void qcs_simulator_set_num_clbits_cxx(qcs_simulator *sim, bit_num_t num_clbits)
     sim->num_clbits = num_clbits;
     sim->clbits.resize(num_clbits);
 }
+double qcs_simulator_expectation_pauli_cxx(qcs_simulator *sim, const bit_num_t *qubit_num_list,
+                                          const qcs_pauli_operator *operators,
+                                          bit_num_t qubit_num_count, double coefficient)
+{
+    if (!sim || !sim->core)
+        throw std::runtime_error("Pauli expectation: null simulator/core");
+    qcs::pauli_detail::validate_simulator_state(sim, sim->core->state_data_device);
+    return sim->core->expectation_pauli(qubit_num_list, operators, qubit_num_count, coefficient);
+}
+
 int qcs_simulator_measure_cxx(qcs_simulator *sim, bit_num_t qubit_num) { return sim->core->measure_qubit(qubit_num); }
 int qcs_simulator_measure_to_clbit_cxx(qcs_simulator *sim, bit_num_t qubit_num, bit_num_t clbit_num)
 {
@@ -3786,6 +3796,20 @@ extern "C" int qcs_simulator_gate_rcccx(qcs_simulator *sim, const bit_num_t *tar
 {
     return qcs_try_cxx([&]()
                 { qcs_simulator_gate_rcccx_cxx(sim, target_qubit_num_list, target_qubit_num_count, negctrl_qubit_num_list, negctrl_qubit_num_count, ctrl_qubit_num_list, ctrl_qubit_num_count); });
+}
+
+extern "C" int qcs_simulator_expectation_pauli(qcs_simulator *sim, const bit_num_t *qubit_num_list,
+                                              const qcs_pauli_operator *operators,
+                                              bit_num_t qubit_num_count, double coefficient, double *result)
+{
+    return qcs_try_cxx([&]()
+    {
+        // Check before entering the collective or materializing projections.
+        if (!result) throw std::runtime_error("Pauli expectation: null result pointer");
+        double value = qcs_simulator_expectation_pauli_cxx(
+            sim, qubit_num_list, operators, qubit_num_count, coefficient);
+        qcs_write_result(result, value);
+    });
 }
 
 extern "C" int qcs_simulator_measure(qcs_simulator *sim, bit_num_t qubit_num, bit_t *result)

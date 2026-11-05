@@ -97,6 +97,8 @@ void qcs_simulator_gate_xx_plus_yy_cxx(qcs_simulator *sim, double theta, double 
 void qcs_simulator_gate_xx_minus_yy_cxx(qcs_simulator *sim, double theta, double beta, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count);
 void qcs_simulator_gate_rccx_cxx(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count);
 void qcs_simulator_gate_rcccx_cxx(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count);
+/* Same expectation contract as the C entry point below; throws on error. */
+double qcs_simulator_expectation_pauli_cxx(qcs_simulator *sim, const bit_num_t *qubit_num_list, const qcs_pauli_operator *operators, bit_num_t qubit_num_count, double coefficient);
 int qcs_simulator_measure_cxx(qcs_simulator *sim, bit_num_t qubit_num);
 int qcs_simulator_measure_to_clbit_cxx(qcs_simulator *sim, bit_num_t qubit_num, bit_num_t clbit_num);
 void qcs_simulator_measure_many_cxx(qcs_simulator *sim, const bit_num_t *qubit_num_list, bit_num_t qubit_num_count, bit_t *results);
@@ -179,6 +181,19 @@ int qcs_simulator_gate_xx_plus_yy(qcs_simulator *sim, double theta, double beta,
 int qcs_simulator_gate_xx_minus_yy(qcs_simulator *sim, double theta, double beta, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count);
 int qcs_simulator_gate_rccx(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count);
 int qcs_simulator_gate_rcccx(qcs_simulator *sim, const bit_num_t *target_qubit_num_list, bit_num_t target_qubit_num_count, const bit_num_t *negctrl_qubit_num_list, bit_num_t negctrl_qubit_num_count, const bit_num_t *ctrl_qubit_num_list, bit_num_t ctrl_qubit_num_count);
+/*
+ * Compute coefficient * <psi|P|psi> without implicit normalization.
+ * Parallel arrays specify distinct logical qubits and I/X/Y/Z operators.
+ * A zero count is identity and permits NULL arrays; result must not be NULL.
+ * The coefficient must be finite. Non-identity support must fit local qubits.
+ * Requires allocated, explicitly initialized state storage. Pending measurement
+ * projections are applied; recorded outcomes, classical bits, and RNG are kept.
+ * Global targets are localized and the updated mapping is retained.
+ * Collective: all ranks must supply identical arguments in the same call order.
+ * Calls on a simulator must be serialized. Returns 1 on success, 0 on error
+ * through the exception callback. The result is written only on success.
+ */
+int qcs_simulator_expectation_pauli(qcs_simulator *sim, const bit_num_t *qubit_num_list, const qcs_pauli_operator *operators, bit_num_t qubit_num_count, double coefficient, double *result);
 int qcs_simulator_measure(qcs_simulator *sim, bit_num_t qubit_num, bit_t *result);
 int qcs_simulator_measure_to_clbit(qcs_simulator *sim, bit_num_t qubit_num, bit_num_t clbit_num, bit_t *result);
 /*

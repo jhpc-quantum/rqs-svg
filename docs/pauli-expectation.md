@@ -3,8 +3,8 @@
 The host-side input contract, standalone two-stage CUDA reducer, and CPU/GPU
 test sources are implemented. The simulator shares its measurement workspace
 with the Pauli reducer. The internal simulator-core operation integrates
-projection, localization, and NCCL summation. Public expectation functions
-are future work.
+projection, localization, and NCCL summation. Public C and C++ expectation
+functions expose that operation.
 The operator enum is available in [`qcs.h`](../include/qcs.h); internal helpers
 are in [`pauli_string.hpp`](../src/pauli_string.hpp).
 
@@ -161,8 +161,8 @@ This coverage remains uncompiled and unexecuted here because `nvcc` is unavailab
 ## Simulator-core operation
 
 `simulator_core::expectation_pauli(qubits, operators, count, coefficient)` is an
-internal synchronous operation returning `double`. The public C/C++ entry points
-will be added separately. The operation requires allocated, explicitly initialized
+internal synchronous operation returning `double`, exposed through the public
+C/C++ entry points below. The operation requires allocated, explicitly initialized
 state storage and matching arguments/call order on every participating rank.
 Argument validation completes before pending projections or mappings are changed.
 
@@ -209,3 +209,74 @@ bits, measured lists/masks, and the RNG cursor/exhaustion flag. Numerical
 tolerances are `1e-12 + 5e-12 * abs(reference)` for expectations and `1e-12` for
 logical amplitudes. These are test criteria, not measured results: the core
 harness remains uncompiled and unexecuted here because `nvcc` is unavailable.
+
+## Public API
+
+Both entry points are declared in [`qcs.h`](../include/qcs.h):
+
+```cpp
+double qcs_simulator_expectation_pauli_cxx(
+    qcs_simulator *sim, const bit_num_t *qubit_num_list,
+    const qcs_pauli_operator *operators, bit_num_t qubit_num_count,
+    double coefficient);
+
+int qcs_simulator_expectation_pauli(
+    qcs_simulator *sim, const bit_num_t *qubit_num_list,
+    const qcs_pauli_operator *operators, bit_num_t qubit_num_count,
+    double coefficient, double *result);
+```
+
+The C++ entry point throws on error. The C entry point uses the existing
+exception callback and returns `1` on success or `0` on error. It requires a
+non-null output pointer even for an empty string and writes the output only
+on success. It validates that pointer before entering the core operation.
+
+For example, after creating, allocating, and explicitly initializing `sim`,
+compute `-0.5 * <X_0 Y_3>` from C:
+
+```c
+const bit_num_t qubits[] = {0, 3};
+const qcs_pauli_operator operators[] = {QCS_PAULI_X, QCS_PAULI_Y};
+double value;
+if (!qcs_simulator_expectation_pauli(sim, qubits, operators, 2, -0.5, &value)) {
+    /* The configured exception callback receives the error. */
+    return 1;
+}
+```
+
+The equivalent C++ call is:
+
+```cpp
+double value = qcs_simulator_expectation_pauli_cxx(sim, qubits, operators, 2, -0.5);
+```
+
+Pass null arrays with count zero for identity. Explicit identity operators are
+also accepted. Null simulators, missing allocation, negative/excessive counts,
+missing nonempty arrays, duplicate/out-of-range qubits, invalid operators,
+non-finite coefficients, and support larger than the local qubit count are
+rejected. Storage initialization remains a caller precondition because the
+existing simulator does not track initialization separately from allocation.
+
+These are synchronous collective calls. Every rank must call with the same
+valid arrays, count, and coefficient in the same order. Input validation is
+local; the API does not add a collective to detect mismatched arguments or
+repair inconsistent rank participation. Calls sharing a simulator must be
+serialized. The operation retains localization mapping changes, applies pending
+projections, preserves measurement records/RNG/classical bits, and returns the
+raw expectation including the coefficient without implicit normalization.
+
+On a configured CUDA/MPI/NCCL machine:
+
+```sh
+make test-pauli-api RANKS=1
+make test-pauli-api RANKS=2
+make test-pauli-api RANKS=4
+```
+
+The integration executable links `tests/pauli_api_c.c` compiled as C11 with
+`tests/pauli_api_test.cpp` and the shared library. Coverage includes both
+interfaces, C status/callback behavior, unchanged output on rejected requests,
+positive/negative/zero coefficients, empty/all-identity strings, signed Y
+expectations, Bell correlations, and raw norms after measurement. The two
+caller sources compile independently with strict warnings in this environment.
+Linking and GPU execution remain unverified because `nvcc` is unavailable.
