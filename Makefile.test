@@ -163,3 +163,15 @@ test-pauli-api: $(PAULI_API_TEST)
 	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_API_TEST))
 
 TEST_BINARIES += $(PAULI_API_TEST) $(PAULI_API_C_OBJECT)
+
+# Reuse the measurement copier for constant/global metadata source variants.
+PAULI_CORE_METADATA_TEST ?= $(MEASUREMENT_HARNESS_DIR)/pauli_core_test
+$(PAULI_CORE_METADATA_TEST): tests/pauli_core_test.cu tests/pauli_reference.hpp $(MEASUREMENT_HARNESS_DIR)/qcs.cu
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) -DQCS_PAULI_SOURCE='"$(abspath $(MEASUREMENT_HARNESS_DIR))/qcs.cu"' $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-pauli-distributed
+test-pauli-distributed: $(PAULI_CORE_METADATA_TEST)
+	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_CORE_METADATA_TEST))
+
+TEST_BINARIES += $(PAULI_CORE_METADATA_TEST)

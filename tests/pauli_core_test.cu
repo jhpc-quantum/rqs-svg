@@ -1,8 +1,12 @@
 // Private core integration coverage; no public expectation API is added here.
-#include "../src/qcs.cu"
+#ifndef QCS_PAULI_SOURCE
+#define QCS_PAULI_SOURCE "../src/qcs.cu"
+#endif
+#include QCS_PAULI_SOURCE
 #include "pauli_reference.hpp"
 #include <iostream>
 #include <numeric>
+#include <random>
 
 using state = std::vector<pauli_test::complex>;
 static unsigned checks = 0;
@@ -46,7 +50,8 @@ static void check_state(qcs::simulator_core& c, const state& expected)
     for (uint64_t i = 0; i < local.size(); ++i)
     {
         auto actual = pauli_test::complex(local[i].real(), local[i].imag());
-        error = std::max(error, double(std::abs(actual - expected[logical_index(c, i)])));
+        if (!std::isfinite(actual.real()) || !std::isfinite(actual.imag())) error = INFINITY;
+        else error = std::max(error, double(std::abs(actual - expected[logical_index(c, i)])));
     }
     double worst;
     ATLC_CHECK_MPI(MPI_Allreduce, &error, &worst, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
@@ -67,8 +72,14 @@ static double compare(qcs_simulator* sim, const state& expected,
     auto clbits = sim->clbits;
     auto* storage = c.measurement_workspace->data();
     auto capacity = c.measurement_workspace->capacity();
-    double result = c.expectation_pauli(targets.data(), operators.data(),
-                                        static_cast<bit_num_t>(targets.size()), coefficient);
+    double result;
+    if (checks % 2)
+        result = qcs_simulator_expectation_pauli_cxx(sim, targets.data(), operators.data(),
+                                                   static_cast<bit_num_t>(targets.size()), coefficient);
+    else
+        require(qcs_simulator_expectation_pauli(sim, targets.data(), operators.data(),
+                                                static_cast<bit_num_t>(targets.size()), coefficient, &result) == 1,
+                "public C expectation failed");
     long double oracle = pauli_test::expectation(expected, targets, operators, coefficient);
     require(std::isfinite(result) && std::abs(result - oracle) <= 1e-12L + 5e-12L * std::abs(oracle),
             "core expectation/CPU oracle mismatch");
@@ -101,6 +112,77 @@ static void reference_x(state& values, int qubit)
     size_t bit = size_t(1) << qubit;
     for (size_t i = 0; i < values.size(); ++i) if (!(i & bit)) std::swap(values[i], values[i | bit]);
 }
+static void distributed_cases(qcs_simulator* sim)
+{
+    auto& c = *sim->core;
+    std::mt19937_64 random(0x5041554c49);
+    std::uniform_real_distribution<double> real(-1, 1);
+    for (int layout = 0; layout < 5; ++layout)
+    {
+        c.initial_perm_p2l.resize(c.num_qubits);
+        std::iota(c.initial_perm_p2l.begin(), c.initial_perm_p2l.end(), 0);
+        if (layout == 1) std::reverse(c.initial_perm_p2l.begin(), c.initial_perm_p2l.end());
+        if (layout > 1) std::shuffle(c.initial_perm_p2l.begin(), c.initial_perm_p2l.end(), random);
+        state input(c.num_states);
+        double scale = layout % 2 ? 1 : 1 / std::sqrt(double(c.num_states));
+        for (auto& a : input) a = pauli_test::complex(scale * real(random), scale * real(random));
+        // Reset before each operator to guarantee the chosen bit starts global
+        // on distributed runs, including diagonal Z which must also localize.
+        for (auto op : {QCS_PAULI_Z, QCS_PAULI_X, QCS_PAULI_Y})
+        {
+            upload(c, input);
+            bit_num_t target = c.perm_p2l.back();
+            compare(sim, input, {target}, {op}, -0.75);
+        }
+        upload(c, input);
+        for (int trial = 0; trial < 40; ++trial)
+        {
+            std::vector<bit_num_t> targets(c.num_qubits);
+            std::iota(targets.begin(), targets.end(), 0);
+            std::shuffle(targets.begin(), targets.end(), random);
+            targets.resize(trial % (c.num_qubits_local + 1));
+            std::vector<qcs_pauli_operator> ops;
+            for (size_t t = 0; t < targets.size(); ++t)
+                ops.push_back(static_cast<qcs_pauli_operator>(random() % 4));
+            compare(sim, input, targets, ops, trial % 3 == 0 ? -2 : (trial % 3 == 1 ? 0 : 1));
+        }
+        upload(c, input);
+        std::vector<bit_num_t> maximum{static_cast<bit_num_t>(c.perm_p2l.back())};
+        for (int p = 0; int(maximum.size()) < c.num_qubits_local; ++p)
+            maximum.push_back(c.perm_p2l[p]);
+        compare(sim, input, maximum, std::vector<qcs_pauli_operator>(maximum.size(), QCS_PAULI_Z));
+        compare(sim, input, maximum, std::vector<qcs_pauli_operator>(maximum.size(), QCS_PAULI_X));
+        for (int ys = 1; ys <= 4; ++ys)
+        {
+            std::vector<bit_num_t> targets(maximum.begin(), maximum.begin() + ys);
+            compare(sim, input, targets, std::vector<qcs_pauli_operator>(ys, QCS_PAULI_Y));
+        }
+        // Fresh local/global pending projections, then request only an inside
+        // target, only an outside target, or both. No renormalization in oracle.
+        for (int selection = 0; selection < 3; ++selection)
+        {
+            upload(c, input);
+            state projected = input;
+            bit_num_t a = c.perm_p2l.back(), b = c.perm_p2l.front(), outside = c.perm_p2l[2];
+            project(projected, a, qcs_simulator_measure_to_clbit_cxx(sim, a, 0));
+            project(projected, b, qcs_simulator_measure_to_clbit_cxx(sim, b, 1));
+            if (selection == 0) compare(sim, projected, {a}, {QCS_PAULI_Y});
+            if (selection == 1) compare(sim, projected, {outside}, {QCS_PAULI_Z});
+            if (selection == 2) compare(sim, projected, {b, a}, {QCS_PAULI_X, QCS_PAULI_Z});
+            compare(sim, projected, {}, {});
+        }
+        state ghz(c.num_states);
+        ghz.front() = ghz.back() = double(1 / std::sqrt(2.0));
+        upload(c, ghz);
+        compare(sim, ghz, {0, static_cast<bit_num_t>(c.num_qubits - 1)}, {QCS_PAULI_Z, QCS_PAULI_Z});
+        compare(sim, ghz, maximum, std::vector<qcs_pauli_operator>(maximum.size(), QCS_PAULI_X));
+        state bell(c.num_states);
+        bell[0] = bell[1 | (size_t(1) << (c.num_qubits - 1))] = double(1 / std::sqrt(2.0));
+        upload(c, bell);
+        compare(sim, bell, {0, static_cast<bit_num_t>(c.num_qubits - 1)}, {QCS_PAULI_Y, QCS_PAULI_Y});
+    }
+}
+
 int main()
 {
     auto* sim = qcs_simulator_create_cxx();
@@ -161,12 +243,25 @@ int main()
             compare(sim, expected, {}, {}, 2); // Observation never draws randomness.
             c.measurement_counter_exhausted = false;
         }
+        distributed_cases(sim);
         // Basis state leaves zero-contribution ranks; all must enter NCCL.
         state basis(size_t(1) << n);
         basis[0] = 1;
         upload(c, basis);
         compare(sim, basis, {0}, {QCS_PAULI_Z});
         compare(sim, basis, {7}, {QCS_PAULI_X});
+        // Reallocate with one local qubit: small reductions plus global swaps.
+        qcs_simulator_dispose_cxx(sim);
+        c.initial_perm_p2l.clear();
+        qcs_simulator_set_num_qubits_cxx(sim, c.log_num_procs + 1);
+        qcs_simulator_allocate_memory_cxx(sim);
+        state tiny(c.num_states);
+        tiny.front() = tiny.back() = double(1 / std::sqrt(2.0));
+        upload(c, tiny);
+        compare(sim, tiny, {}, {}, -2);
+        for (bit_num_t q = 0; q < c.num_qubits; ++q)
+        for (auto op : {QCS_PAULI_X, QCS_PAULI_Y, QCS_PAULI_Z})
+            compare(sim, tiny, {q}, {op});
         if (!c.proc_num) std::cout << "Pauli core: " << checks << " oracle/state checks passed\n";
         qcs_simulator_destroy_cxx(sim);
         return 0;
