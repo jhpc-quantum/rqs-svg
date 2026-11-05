@@ -175,3 +175,14 @@ test-pauli-distributed: $(PAULI_CORE_METADATA_TEST)
 	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_CORE_METADATA_TEST))
 
 TEST_BINARIES += $(PAULI_CORE_METADATA_TEST)
+
+PAULI_BENCHMARK ?= bin/pauli_benchmark
+$(PAULI_BENCHMARK): tests/pauli_benchmark.cu src/qcs.cu src/pauli_reduce.cuh src/pauli_string.hpp src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh src/swap_launch.hpp include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: benchmark-pauli
+benchmark-pauli: $(PAULI_BENCHMARK)
+	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_BENCHMARK)) $(BENCH_QUBITS) $(BENCH_WARMUPS) $(BENCH_REPETITIONS)
+
+TEST_BINARIES += $(PAULI_BENCHMARK)
