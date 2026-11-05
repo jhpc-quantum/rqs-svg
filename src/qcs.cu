@@ -2351,6 +2351,39 @@ namespace qcs
             }
         } /* save_statevector */
 
+        // Collective across all simulator ranks with identical arguments/order.
+        // This observes the effective state without releasing measured qubits or
+        // consuming a measurement draw. It may retain a new physical mapping.
+        double expectation_pauli(const bit_num_t* qubits, const qcs_pauli_operator* operators,
+                                 bit_num_t count, double coefficient)
+        {
+            if (!state_data_device || !measurement_workspace || !pauli_workspace)
+                throw std::runtime_error("Pauli expectation: simulator storage is not allocated");
+            pauli_detail::pauli_string input(num_qubits, num_qubits_local,
+                                             qubits, operators, count, coefficient);
+            std::vector<int> targets;
+            targets.reserve(input.terms().size());
+            for (const auto& term : input.terms()) targets.push_back(term.qubit);
+
+            // Project every measured bit, including bits outside this string,
+            // using the old mapping before any exchange. Projection preserves
+            // the current (possibly unnormalized) amplitudes of the kept branch.
+            materialize_pending_projection(pending_projection_mask_logical);
+            target_qubit_num_logical_list = std::move(targets);
+            localize_target_qubits();
+            auto descriptor = input.descriptor(perm_l2p);
+            double* result_device = pauli_workspace->enqueue(
+                state_data_device, num_states_local, descriptor, stream);
+            // Zero-contribution ranks participate too. Same-stream ordering
+            // covers exchange copy-back, both reductions, NCCL and readback.
+            ATLC_CHECK_NCCL(ncclAllReduce, result_device, result_device, 1,
+                            ncclDouble, ncclSum, nccl_comm, stream);
+            double result;
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, &result, result_device, sizeof(result), cudaMemcpyDeviceToHost, stream);
+            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            return coefficient * result;
+        }
+
         template <int N>
         qcs::float_t* reduce_measure_norm(
             int num_local_targets, const cuda::std::array<int, N> &local_outcome_bits,

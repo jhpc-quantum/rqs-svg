@@ -2,8 +2,9 @@
 
 The host-side input contract, standalone two-stage CUDA reducer, and CPU/GPU
 test sources are implemented. The simulator shares its measurement workspace
-with the Pauli reducer. Localization integration and public expectation
-functions are future work.
+with the Pauli reducer. The internal simulator-core operation integrates
+projection, localization, and NCCL summation. Public expectation functions
+are future work.
 The operator enum is available in [`qcs.h`](../include/qcs.h); internal helpers
 are in [`pauli_string.hpp`](../src/pauli_string.hpp).
 
@@ -19,8 +20,8 @@ internal support list.
 
 The result contract is `coefficient * <psi|P|psi>`, with no implicit
 normalization. Identity therefore returns the coefficient times the squared
-norm, including for unnormalized and projected states. The future operation
-must materialize all pending measurement projections before reduction while
+norm, including for unnormalized and projected states. The core operation
+materializes all pending measurement projections before reduction while
 preserving measurement outcomes and RNG state.
 
 The simulator must exist and have allocated state storage. As with existing
@@ -156,3 +157,55 @@ between operations. It checks poisoned storage, fixed output location,
 pointer/capacity stability, adjacent SWAP guards, wrong streams, a wrong device
 when available, capacity errors, repeated close, and standalone reopen/growth.
 This coverage remains uncompiled and unexecuted here because `nvcc` is unavailable.
+
+## Simulator-core operation
+
+`simulator_core::expectation_pauli(qubits, operators, count, coefficient)` is an
+internal synchronous operation returning `double`. The public C/C++ entry points
+will be added separately. The operation requires allocated, explicitly initialized
+state storage and matching arguments/call order on every participating rank.
+Argument validation completes before pending projections or mappings are changed.
+
+The path is:
+
+1. Validate allocation, dimensions, input arrays, and non-identity support.
+2. Materialize **all** pending projections using the current mapping, including
+   measured qubits outside the requested string. This keeps the current raw
+   branch amplitudes without renormalization.
+3. Pass non-identity logical targets to the existing localization mechanism.
+   Its communication and copy-back stream ordering are reused. Identity targets
+   require no exchange. The updated logical/physical mapping is retained.
+4. Build the descriptor from that updated mapping and enqueue both reduction
+   stages using the shared measurement workspace.
+5. Sum one device `double` per rank using in-place NCCL AllReduce on the owner
+   stream. Ranks with zero local contribution also participate.
+6. Copy one scalar to the host, synchronize that stream once, and multiply by
+   the coefficient once.
+
+Expectation does not use gate preparation/release bookkeeping, measurement
+sampling, or classical-bit updates. Measured masks, recorded values/lists, and
+measurement RNG state are preserved. Only the pending-projection mask is cleared
+as its projections are applied. Subsequent gates and measurements use the
+retained mapping. An exhausted measurement RNG does not prevent expectation.
+No projection normalization, rank-specific early exit, intermediate host
+synchronization, or additional communication path is introduced.
+
+Run the private core harness on a configured CUDA/MPI/NCCL installation:
+
+```sh
+make test-pauli-core RANKS=1
+make test-pauli-core RANKS=2
+make test-pauli-core RANKS=4
+```
+
+`tests/pauli_core_test.cu` compares against the independent matrix oracle and
+checks the physical slices against the expected logical state. It exercises
+identity/reverse mappings, every single-qubit Pauli, mixed non-contiguous targets,
+repeated localization, negative/zero coefficients, unnormalized states, pending
+local/global projections inside/outside the request, rejection before mutation,
+zero-contribution ranks, fixed workspace capacity, and subsequent gates/cached
+and fresh measurements. It checks rank agreement and preservation of classical
+bits, measured lists/masks, and the RNG cursor/exhaustion flag. Numerical
+tolerances are `1e-12 + 5e-12 * abs(reference)` for expectations and `1e-12` for
+logical amplitudes. These are test criteria, not measured results: the core
+harness remains uncompiled and unexecuted here because `nvcc` is unavailable.

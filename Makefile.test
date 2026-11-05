@@ -136,3 +136,14 @@ test-pauli-reduce: $(PAULI_REDUCE_TEST)
 	$(PAULI_REDUCE_TEST)
 
 TEST_BINARIES += $(PAULI_REDUCE_TEST)
+
+PAULI_CORE_TEST ?= bin/pauli_core_test
+$(PAULI_CORE_TEST): tests/pauli_core_test.cu tests/pauli_reference.hpp src/qcs.cu src/pauli_reduce.cuh src/pauli_string.hpp src/measurement_reduce.cuh src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh src/swap_launch.hpp include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-pauli-core
+test-pauli-core: $(PAULI_CORE_TEST)
+	$(MPIEXEC) -n $(RANKS) $(abspath $(PAULI_CORE_TEST))
+
+TEST_BINARIES += $(PAULI_CORE_TEST)
