@@ -49,6 +49,7 @@
 
 #include <qcs.h>
 #include "measurement_reduce.cuh"
+#include "pauli_reduce.cuh"
 #include "work_buffer.cuh"
 #include "swap_launch.hpp"
 
@@ -1167,6 +1168,7 @@ namespace qcs
         int exchange_grid_blocks = 0;
 #endif
         std::unique_ptr<measurement_detail::workspace> measurement_workspace = nullptr;
+        std::unique_ptr<pauli_detail::workspace> pauli_workspace = nullptr;
 
         std::vector<int> operand_qubit_num_list;
         std::vector<int> target_qubit_num_physical_list;
@@ -1605,6 +1607,7 @@ namespace qcs
 #endif
             scratch.allocate_remaining(stream, nccl_buffer_mode != 0);
             measurement_workspace = std::make_unique<measurement_detail::workspace>(stream, scratch.device);
+            pauli_workspace = std::make_unique<pauli_detail::workspace>(*measurement_workspace, stream);
             if constexpr (!exchange_nvshmem_registered_put)
             {
                 uint64_t const available = scratch.device.available() / sizeof(qcs::complex_t);
@@ -1629,6 +1632,7 @@ namespace qcs
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
             deregister_nccl_buffer(nccl_comm, scratch_registration);
             deregister_nccl_buffer(nccl_comm, state_registration);
+            pauli_workspace.reset();
             if (measurement_workspace)
             {
                 // Queue release after every use, before releasing the state or stream.

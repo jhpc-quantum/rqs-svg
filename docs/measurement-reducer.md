@@ -61,6 +61,10 @@ by the device sampler and an eight-byte outcome/status copy. Only that final
 readback is followed by stream synchronization; weights and prefixes remain on
 the device throughout production sampling.
 The owning stream and backing work buffer must outlive the measurement workspace.
+The [Pauli reducer adapter](pauli-expectation.md#shared-measurement-workspace)
+borrows this same slice for scalar reductions, with device, stream, and capacity
+checks. Queue all consumers before reusing the slice; no extra allocation or
+NCCL registration is needed.
 For a borrowed slice, `close()` only detaches it; the simulator frees the backing
 buffer after all uses. For a standalone owning workspace, `close()` reports
 release errors. Descriptor shifts, allocation products, and indexing use checked 64-bit

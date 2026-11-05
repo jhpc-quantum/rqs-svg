@@ -123,12 +123,118 @@ static void reduction_tail(fixture& f)
     require(result == expected, "Stage 2 lost partials beyond one block");
 }
 
+static void workspace_reuse(fixture& f)
+{
+    namespace md = qcs::measurement_detail;
+    int device;
+    ATLC_CHECK_CUDA(cudaGetDevice, &device);
+    auto largest = md::resources<4>(device);
+    size_t bytes = md::allocation_bytes(16 * (uint64_t(largest.blocks) + 1), sizeof(double));
+    bytes = (bytes + 255) / 256 * 256 + 256;
+    void* backing = nullptr;
+    ATLC_CHECK_CUDA(cudaMallocAsync, &backing, bytes, f.stream);
+    qcs::buffer_arena arena(backing, bytes);
+    {
+        md::workspace measured(f.stream, arena);
+        pd::workspace pauli(measured, f.stream);
+        auto* original = measured.data();
+        uint64_t capacity = measured.capacity();
+        size_t remaining = arena.remaining();
+        auto* swap = arena.take(256);
+        ATLC_CHECK_CUDA(cudaMemsetAsync, swap, 0x5a, 256, f.stream);
+        rejects([&] { measured.borrow_scalar(0, f.stream); });
+        rejects([&] { measured.borrow_scalar(capacity, f.stream); });
+        rejects([&] { measured.borrow_scalar(UINT64_MAX, f.stream); });
+        require(arena.remaining() < remaining, "swap slice was not reserved");
+        remaining = arena.remaining();
+        std::vector<State> input(512, State(1, 0));
+        ATLC_CHECK_CUDA(cudaMemcpyAsync, f.state, input.data(), input.size() * sizeof(State),
+                        cudaMemcpyHostToDevice, f.stream);
+        std::array<double, 12> results{};
+        std::array<std::array<double, 2>, 12> bins{};
+        std::array<md::sample_result, 12> samples{};
+        md::descriptor<1> d{};
+        d.local_targets = 1;
+        d.local_target_physical[0] = 0;
+        d.local_outcome_bits[0] = 0;
+        for (unsigned i = 0; i < results.size(); ++i)
+        {
+            ATLC_CHECK_CUDA(cudaMemsetAsync, original, 0xff, capacity * sizeof(double), f.stream);
+            auto* weights = measured.enqueue<1>(f.state, 512, d, f.stream);
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, bins[i].data(), weights, 2 * sizeof(double),
+                            cudaMemcpyDeviceToHost, f.stream);
+            auto* sampled = measured.enqueue_sample<1>(weights, 123, i, f.stream);
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, &samples[i], sampled, sizeof(samples[i]),
+                            cudaMemcpyDeviceToHost, f.stream);
+            pd::PauliStringDescriptor p{2, i % 3 == 0 ? UINT64_C(1) : 0,
+                                         i % 3 == 1 ? UINT64_C(1) : 0, 0};
+            auto* output = pauli.enqueue(f.state, 512, p, f.stream);
+            require(output == original + capacity - 1, "shared output slot moved");
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, &results[i], output, sizeof(double),
+                            cudaMemcpyDeviceToHost, f.stream);
+        }
+        std::array<unsigned char, 256> guard{};
+        ATLC_CHECK_CUDA(cudaMemcpyAsync, guard.data(), swap, guard.size(), cudaMemcpyDeviceToHost, f.stream);
+        ATLC_CHECK_CUDA(cudaStreamSynchronize, f.stream);
+        for (unsigned i = 0; i < results.size(); ++i)
+        {
+            require(results[i] == (i % 3 == 1 ? 0 : 512), "shared Pauli result mismatch");
+            require(bins[i][0] == 256 && bins[i][1] == 256, "shared measurement mismatch");
+            require(samples[i].status == md::sample_status::success && samples[i].outcome < 2,
+                    "shared measurement sampler mismatch");
+        }
+        require(std::all_of(guard.begin(), guard.end(), [](unsigned char v) { return v == 0x5a; }),
+                "shared workspace overwrote swap slice");
+        require(measured.data() == original && measured.capacity() == capacity && arena.remaining() == remaining,
+                "shared workspace grew or moved");
+        cudaStream_t other{};
+        ATLC_CHECK_CUDA(cudaStreamCreate, &other);
+        rejects([&] { measured.borrow_scalar(1, other); });
+        rejects([&] { pd::workspace wrong(measured, other); });
+        rejects([&] { pauli.enqueue(f.state, 512, {1, 0, 0, 0}, other); });
+        ATLC_CHECK_CUDA(cudaStreamDestroy, other);
+        int count;
+        ATLC_CHECK_CUDA(cudaGetDeviceCount, &count);
+        if (count > 1)
+        {
+            ATLC_CHECK_CUDA(cudaSetDevice, (device + 1) % count);
+            rejects([&] { measured.borrow_scalar(1, f.stream); });
+            rejects([&] { pauli.enqueue(f.state, 512, {1, 0, 0, 0}, f.stream); });
+            ATLC_CHECK_CUDA(cudaSetDevice, device);
+        }
+        measured.close();
+        measured.close();
+        rejects([&] { measured.borrow_scalar(1, f.stream); });
+        rejects([&] { pauli.enqueue(f.state, 512, {1, 0, 0, 0}, f.stream); });
+        // Borrowed close must not release the arena backing or adjacent swap.
+        ATLC_CHECK_CUDA(cudaMemsetAsync, backing, 0, bytes, f.stream);
+    }
+    ATLC_CHECK_CUDA(cudaFreeAsync, backing, f.stream);
+    {
+        md::workspace owned(f.stream);
+        rejects([&] { pd::workspace unallocated(owned, f.stream); });
+        owned.reserve<1>(f.stream);
+        pd::workspace pauli(owned, f.stream);
+        owned.close();
+        rejects([&] { pauli.enqueue(f.state, 1, {1, 0, 0, 0}, f.stream); });
+        // The adapter borrows afresh after standalone storage is reopened/grown.
+        owned.reserve<4>(f.stream);
+        auto* result = pauli.enqueue(f.state, 1, {1, 0, 0, 0}, f.stream);
+        double scalar = 0;
+        ATLC_CHECK_CUDA(cudaMemcpyAsync, &scalar, result, sizeof(scalar), cudaMemcpyDeviceToHost, f.stream);
+        ATLC_CHECK_CUDA(cudaStreamSynchronize, f.stream);
+        require(scalar == 1, "adapter reused stale allocation after reopen");
+        owned.close();
+    }
+}
+
 int main()
 {
     try
     {
         fixture f;
         f.init();
+        workspace_reuse(f);
         invalid_inputs(f);
         reduction_tail(f);
         f.compare({2}, {}, {}, -3);

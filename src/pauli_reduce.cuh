@@ -107,6 +107,53 @@ inline launch_config resources(int device, uint64_t work_items)
     return {static_cast<unsigned>(blocks)};
 }
 
+// Internal launch after validation and workspace/geometry checks.
+inline void launch(const state_type* state, uint64_t local_dim,
+                   const PauliStringDescriptor& d, unsigned blocks,
+                   double* partials, double* output, cudaStream_t stream)
+{
+    if (d.flip_mask)
+        first_stage<true><<<blocks, block_size, 0, stream>>>(state, local_dim, d, partials);
+    else
+        first_stage<false><<<blocks, block_size, 0, stream>>>(state, local_dim, d, partials);
+    ATLC_CHECK_CUDA(cudaGetLastError);
+    second_stage<<<1, block_size, 0, stream>>>(partials, blocks, output);
+    ATLC_CHECK_CUDA(cudaGetLastError);
+}
+
+// Non-owning adapter over the measurement slice. The slice and its stream must
+// outlive this adapter. No device pointer is cached, so close/growth of the
+// standalone measurement workspace is checked on every borrow. Serialized host
+// calls are required, as for measurement; all device uses share the owner stream.
+class workspace
+{
+    measurement_detail::workspace& storage_;
+    unsigned max_blocks_;
+
+public:
+    workspace(measurement_detail::workspace& storage, cudaStream_t stream)
+        : storage_(storage), max_blocks_(0)
+    {
+        storage_.borrow_scalar(1, stream); // Check owner and existing allocation.
+        max_blocks_ = resources(storage_.device(), UINT64_MAX).blocks;
+        storage_.borrow_scalar(max_blocks_, stream); // No allocation or growth.
+    }
+    workspace(const workspace&) = delete;
+    workspace& operator=(const workspace&) = delete;
+
+    double* enqueue(const state_type* state, uint64_t local_dim,
+                    const PauliStringDescriptor& d, cudaStream_t stream)
+    {
+        if (!state) throw std::runtime_error("Pauli reducer: missing state");
+        uint64_t count = validate_descriptor(local_dim, d);
+        unsigned blocks = static_cast<unsigned>(std::min<uint64_t>(max_blocks_,
+            count / block_size + (count % block_size != 0)));
+        auto borrowed = storage_.borrow_scalar(blocks, stream);
+        launch(state, local_dim, d, blocks, borrowed.partials, borrowed.output, stream);
+        return borrowed.output;
+    }
+};
+
 // Borrowed storage only: caller provides capacity >= resources(...).blocks+1
 // doubles on the current device. Storage/state must not overlap and must remain
 // alive until the stream completes. Calls sharing storage must be serialized on
@@ -125,13 +172,7 @@ inline double* enqueue(const state_type* state, uint64_t local_dim,
     if (capacity <= config.blocks)
         throw std::runtime_error("Pauli reducer: workspace capacity exceeded");
     double* output = workspace + capacity - 1;
-    if (d.flip_mask)
-        first_stage<true><<<config.blocks, block_size, 0, stream>>>(state, local_dim, d, workspace);
-    else
-        first_stage<false><<<config.blocks, block_size, 0, stream>>>(state, local_dim, d, workspace);
-    ATLC_CHECK_CUDA(cudaGetLastError);
-    second_stage<<<1, block_size, 0, stream>>>(workspace, config.blocks, output);
-    ATLC_CHECK_CUDA(cudaGetLastError);
+    launch(state, local_dim, d, config.blocks, workspace, output, stream);
     return output;
 }
 } // namespace qcs::pauli_detail

@@ -345,7 +345,7 @@ launch_config resources(int device)
 // Single owner, bound to the construction device and caller-owned stream.
 // Keep that stream alive through close/destruction. Calls must be serialized by
 // the owner. Result storage is valid until the next reserve, enqueue,
-// enqueue_zero or close, and may be consumed in place on the owner stream.
+// enqueue_zero, borrow_scalar or close, and may be consumed in place on the owner stream.
 class workspace
 {
     int device_ = -1;
@@ -364,6 +364,23 @@ class workspace
     }
 
 public:
+    struct scalar_storage
+    {
+        double* partials;
+        double* output;
+    };
+
+    // Share the existing registered slice with scalar reductions on the owner
+    // stream. Borrowing never grows storage. All earlier consumers must already
+    // be queued on that stream; the next workspace operation invalidates results.
+    scalar_storage borrow_scalar(uint64_t partial_count, cudaStream_t stream)
+    {
+        require_owner(stream);
+        if (!data_ || !partial_count || partial_count >= capacity_)
+            throw std::runtime_error("measurement reducer: scalar workspace capacity exceeded or closed");
+        return {data_, data_ + capacity_ - 1};
+    }
+
     explicit workspace(cudaStream_t stream) : stream_(stream)
     {
         ATLC_CHECK_CUDA(cudaGetDevice, &device_);

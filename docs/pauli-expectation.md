@@ -1,8 +1,9 @@
 # Pauli string expectation contract
 
 The host-side input contract, standalone two-stage CUDA reducer, and CPU/GPU
-test sources are implemented. Workspace ownership, localization integration,
-and public expectation functions are future work.
+test sources are implemented. The simulator shares its measurement workspace
+with the Pauli reducer. Localization integration and public expectation
+functions are future work.
 The operator enum is available in [`qcs.h`](../include/qcs.h); internal helpers
 are in [`pauli_string.hpp`](../src/pauli_string.hpp).
 
@@ -99,9 +100,8 @@ application after NCCL AllReduce.
 It writes partials at the start and returns the last buffer element as the
 output slot. No allocation or stream synchronization occurs. State and scratch
 must be disjoint, on the current device, and alive until stream completion.
-Calls sharing scratch must be serialized on the same stream. Device/kernel
-resource limits are checked at launch; caching these checks and enforcing
-workspace ownership belong to the next integration step.
+Calls sharing scratch must be serialized on the same stream. The raw-pointer overload checks device/kernel resource limits at launch.
+The simulator uses the checked workspace adapter described below.
 
 On a configured CUDA machine, run:
 
@@ -124,3 +124,35 @@ coefficient application to its caller.
 CUDA tools were absent from PATH during implementation, so the CUDA source and
 test have not been compiled or executed. GPU numerical accuracy, sanitizer
 results, and measurement regression results remain unverified.
+
+## Shared measurement workspace
+
+The simulator constructs a `pauli_detail::workspace` adapter immediately after
+reserving the measurement slice and before carving out SWAP storage. The adapter
+borrows that same slice through `measurement_detail::workspace::borrow_scalar`.
+The measurement reservation already exceeds the Pauli requirement, so neither
+the arena layout nor NCCL registration needs another region. The scalar output
+is always the last double in the measurement slice; partials occupy its start.
+
+The adapter caches the maximum `4 * SM_count` launch configuration and validates
+kernel limits once at setup. Each call clamps that geometry to the current work
+count and checks that the storage is allocated, has sufficient capacity, and
+belongs to the current device and supplied stream. Borrowing never allocates or
+grows storage. A closed workspace rejects borrowing. The standalone owning
+measurement workspace may be reopened; the adapter obtains current storage on
+each call instead of retaining a stale device pointer.
+
+Measurement reduction, sampling, Pauli reduction, NCCL, and result consumption
+must be queued serially on the owner stream. A result must be consumed on that
+stream before the next workspace operation. Host calls sharing the workspace
+must also be serialized, matching the existing simulator contract. No extra
+stream synchronization or cross-stream sharing is introduced. Simulator teardown
+joins existing work, destroys the adapter, then closes measurement storage before
+releasing the backing work buffer.
+
+The CUDA test source now includes alternating measurement reduction, device
+sampling, and Pauli reduction on the same slice, without explicit synchronization
+between operations. It checks poisoned storage, fixed output location,
+pointer/capacity stability, adjacent SWAP guards, wrong streams, a wrong device
+when available, capacity errors, repeated close, and standalone reopen/growth.
+This coverage remains uncompiled and unexecuted here because `nvcc` is unavailable.
