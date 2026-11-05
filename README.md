@@ -42,6 +42,7 @@ NUM_QUBITS=3 mpirun -np 1 ./bin/qcs --num-samples 10 ghz_circuit.so
 - [Building and runtime setup](docs/building.md): prerequisites, vendor flags, shared library, and library search paths.
 - [Usage and API](docs/usage.md): circuit compilation, MPI execution, statevector output, initial states, C linking, SWAP, and measurement APIs.
 - [Advanced configuration and implementation](docs/advanced-configuration.md): kernel constants, work buffers, NVSHMEM exchange, NCCL copy-back, and CUDA synchronization.
+- [Pauli string expectations](docs/pauli-expectation.md): C/C++ API, implementation, validation status, and benchmarks.
 - [Measurement reducer](docs/measurement-reducer.md): grouped reduction, GPU sampling, RNG guarantees, regression tests, and profiling.
 - [Explicit NCCL buffer registration](docs/nccl-buffer-registration.md): default buffer registration, alternative modes, and cluster validation.
 

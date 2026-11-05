@@ -100,7 +100,7 @@ public:
     }
 };
 
-// The future API wrapper checks these before reading core dimensions/metadata.
+// The API checks the simulator pointer before obtaining core state storage.
 // Allocation does not prove initialization: an explicit state setter is still
 // a caller precondition, as with existing gates and measurements.
 inline void validate_simulator_state(const qcs_simulator* simulator, const void* state)
