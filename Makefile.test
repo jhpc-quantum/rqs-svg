@@ -114,3 +114,14 @@ SWAP_LARGE_QUBITS ?= 20
 .PHONY: test-swap-large
 test-swap-large: $(SWAP_HARNESS)
 	$(MPIEXEC) -n $(RANKS) $(abspath $(SWAP_HARNESS)) large $(SWAP_LARGE_QUBITS)
+
+PAULI_STRING_TEST ?= bin/pauli_string_test
+$(PAULI_STRING_TEST): tests/pauli_string_test.cpp tests/pauli_reference.hpp src/pauli_string.hpp include/qcs.h
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-pauli-string
+test-pauli-string: $(PAULI_STRING_TEST)
+	$(PAULI_STRING_TEST)
+
+TEST_BINARIES += $(PAULI_STRING_TEST)

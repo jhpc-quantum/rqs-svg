@@ -18,6 +18,15 @@ typedef enum qcs_initial_state
     QCS_INITIAL_STATE_LOAD_STATEVECTOR
 } qcs_initial_state;
 
+/* Operators for a single Pauli string; qubit indices are logical indices. */
+typedef enum qcs_pauli_operator
+{
+    QCS_PAULI_I = 0,
+    QCS_PAULI_X,
+    QCS_PAULI_Y,
+    QCS_PAULI_Z
+} qcs_pauli_operator;
+
 typedef struct qcs_simulator qcs_simulator;
 typedef void (*qcs_exception_callback)(char const *message, size_t message_length);
 typedef int16_t bit_num_t;
