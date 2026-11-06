@@ -120,6 +120,26 @@ inline void run(qcs_simulator* sim) {
     }
 }
 
+inline void measurement_order(qcs_simulator* sim) {
+    auto& c = *sim->core;
+    qcs_simulator_set_zero_state_cxx(sim);
+    std::vector<bit_num_t> targets(c.num_qubits), clbits(c.num_qubits);
+    std::vector<bit_t> bits(c.num_qubits);
+    for (int i = 0; i < c.num_qubits; ++i) {
+        targets[i] = i;
+        clbits[i] = c.num_qubits - 1 - i;
+    }
+    std::vector<int> expected;
+    for (int p = c.num_qubits_local - 1; p >= 0; --p)
+        expected.push_back(c.perm_p2l[p]);
+    for (int p = c.num_qubits_local; p < c.num_qubits; ++p)
+        expected.push_back(c.perm_p2l[p]);
+    qcs_simulator_measure_many_to_clbits_cxx(
+        sim, targets.data(), c.num_qubits, clbits.data(), c.num_qubits, bits.data());
+    require(c.measured_0_qubit_num_logical_list == expected,
+            "measurement order must be local high-to-low, then global low-to-high");
+}
+
 inline void lifecycle(qcs_simulator* sim) {
     auto& c = *sim->core;
     require(c.measurement_counter == 0 && !c.measurement_counter_exhausted,
@@ -144,11 +164,6 @@ inline void lifecycle(qcs_simulator* sim) {
     bit_t bits[5]{};
     qcs_simulator_measure_many_to_clbits_cxx(sim, targets, 5, clbits, 5, bits);
     expected += 2; check();
-    const auto& measured_zero = c.measured_0_qubit_num_logical_list;
-    require(measured_zero.size() >= 5 &&
-            std::equal(measured_zero.end() - 5, measured_zero.end(),
-                       std::vector<int>{11, 10, 9, 8, 7}.begin()),
-            "classical-bit measurement must visit higher logical qubits first");
     qcs_simulator_measure_many_to_clbits_cxx(sim, targets, 5, clbits, 5, bits); check();
     auto* data = c.measurement_workspace->data();
     auto capacity = c.measurement_workspace->capacity();

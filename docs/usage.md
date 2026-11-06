@@ -137,9 +137,10 @@ qubits in the Z basis and returns one correlated result per input element.
 `qcs_simulator_measure_many_to_clbits` additionally writes each result to the
 classical bit at the corresponding position in its destination list.  The two
 counts must match and destinations must be distinct.  An empty request is a
-successful no-op. The `_to_clbits` variant measures groups starting with the
-highest logical qubit indices, regardless of input order. Results and classical
-bit destinations still correspond to the original input positions.
+successful no-op. Using the current logical-to-physical mapping, the `_to_clbits`
+variant orders targets by descending local physical index, followed by ascending
+global physical index, then forms measurement groups. Results and classical bit
+destinations still correspond to the original input positions.
 
 ```c
 const bit_num_t qubits[] = {5, 1, 3};

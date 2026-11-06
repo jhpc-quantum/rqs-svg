@@ -3095,7 +3095,15 @@ void qcs_simulator_measure_many_to_clbits_cxx(
     for (size_t i = 0; i < qubits.size(); ++i)
         measurement_order[i] = i;
     std::sort(measurement_order.begin(), measurement_order.end(),
-              [&](size_t a, size_t b) { return qubits[a] > qubits[b]; });
+              [&](size_t a, size_t b) {
+                  int const physical_a = sim->core->perm_l2p[qubits[a]];
+                  int const physical_b = sim->core->perm_l2p[qubits[b]];
+                  bool const local_a = physical_a < sim->core->num_qubits_local;
+                  bool const local_b = physical_b < sim->core->num_qubits_local;
+                  if (local_a != local_b)
+                      return local_a;
+                  return local_a ? physical_a > physical_b : physical_a < physical_b;
+              });
     std::vector<int> sorted_qubits;
     sorted_qubits.reserve(qubits.size());
     for (size_t const i : measurement_order)

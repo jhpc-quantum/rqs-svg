@@ -255,6 +255,7 @@ int main(int argc, char** argv) {
 #if MEASUREMENT_GPU_SAMPLING
             sampling_cases::run(sim);
             sampling_cases::lifecycle(sim);
+            sampling_cases::measurement_order(sim);
 #endif
             regression(sim);
         }
