@@ -50,3 +50,6 @@ requested. CUDA/MPI correctness and performance remain unverified. This initial
 implementation allocates temporary storage per fresh call and copies chunk
 weights to the host; large-state memory traffic, allocations, and MPI latency
 may limit performance. It does not promise improvement over the grouped backend.
+
+See [performance benchmarking and profiling](measurement-performance.md) for
+paired backend workloads, GB200 NVL4 launch commands, and timing methodology.

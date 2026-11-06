@@ -197,3 +197,21 @@ test-measurement-launch: $(MEASUREMENT_LAUNCH_TEST)
 	$(MEASUREMENT_LAUNCH_TEST)
 
 TEST_BINARIES += $(MEASUREMENT_LAUNCH_TEST)
+
+MEASUREMENT_BACKEND_BENCHMARK ?= bin/measurement_backend_benchmark
+MEASUREMENT_BACKEND_PROFILE ?= bin/measurement_backend_profile
+MEASUREMENT_BACKEND_DEPS = tests/measurement_backend_benchmark.cu $(wildcard src/*.cuh src/*.hpp) src/qcs.cu include/qcs.h
+$(MEASUREMENT_BACKEND_BENCHMARK): $(MEASUREMENT_BACKEND_DEPS)
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+$(MEASUREMENT_BACKEND_PROFILE): $(MEASUREMENT_BACKEND_DEPS)
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) -DQCS_MEASUREMENT_PROFILE $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: measurement-backend-benchmark measurement-backend-profile
+measurement-backend-benchmark: $(MEASUREMENT_BACKEND_BENCHMARK)
+measurement-backend-profile: $(MEASUREMENT_BACKEND_PROFILE)
+
+# Private source-copy builds also consume the compile-time profiling header.
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST): src/measurement_profile.hpp
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_profile.hpp
