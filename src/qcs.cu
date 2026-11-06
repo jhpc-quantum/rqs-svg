@@ -2468,7 +2468,16 @@ namespace qcs
                 norm_device, rng_seed, measurement_counter, stream);
             measurement_detail::sample_result result{};
             ATLC_CHECK_CUDA(cudaMemcpyAsync, &result, result_device, sizeof(result), cudaMemcpyDeviceToHost, stream);
-            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            // Yield only while waiting for measurement readback. Preserve all
+            // other device flags and restore scheduling even if the wait fails.
+            unsigned int previous_flags = 0;
+            ATLC_CHECK_CUDA(cudaGetDeviceFlags, &previous_flags);
+            ATLC_CHECK_CUDA(cudaSetDeviceFlags,
+                            (previous_flags & ~cudaDeviceScheduleMask) | cudaDeviceScheduleYield);
+            cudaError_t const sync_status = cudaStreamSynchronize(stream);
+            ATLC_CHECK_CUDA(cudaSetDeviceFlags, previous_flags);
+            if (sync_status != cudaSuccess)
+                throw std::runtime_error(std::string("measurement readback: ") + cudaGetErrorString(sync_status));
             if (result.status == measurement_detail::sample_status::invalid_weight)
                 throw std::runtime_error("invalid measurement probability component");
             if (result.status != measurement_detail::sample_status::success)
