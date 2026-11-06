@@ -2381,8 +2381,8 @@ namespace qcs
             measurement_detail::descriptor<N> descriptor{};
             descriptor.local_targets = num_local_targets;
             descriptor.fixed_outcome = fixed_outcome;
-            // Physical targets retain caller order; operand_qubit_num_list also
-            // contains targets and must not be used as the control domain.
+            // Physical targets retain caller order; only previously measured
+            // qubits belong in the control domain.
             for (int i = 0; i < num_local_targets; ++i)
             {
                 descriptor.local_target_physical[i] = target_qubit_num_physical_list[i];
@@ -2450,7 +2450,8 @@ namespace qcs
             // without moving statevector data or changing the permutation.
             localize_target_qubits();
             check_control_qubit_num_physical();
-            prepare_operating_gate();
+            // The reducer passes its own descriptor by value. Gate metadata,
+            // sorted operands and gate launch dimensions are not consumed here.
 
             // Every rank supplies all outcome bins, including ranks excluded by
             // earlier measurements. Clear their output rather than reuse weights.

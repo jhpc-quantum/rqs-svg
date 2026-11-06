@@ -1,5 +1,8 @@
 # Measurement reducer and reproducible validation
 
+See [measurement gate metadata removal](measurement-metadata.md) for the
+measurement preparation dependency audit and validation status of that change.
+
 [README](../README.md) · [Usage and API](usage.md) · [Advanced configuration](advanced-configuration.md)
 
 Production measurement uses the custom shared-memory, bin-major two-stage
