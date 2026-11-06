@@ -132,12 +132,12 @@ inline void measurement_order(qcs_simulator* sim) {
     std::vector<int> expected;
     for (int p = c.num_qubits_local - 1; p >= 0; --p)
         expected.push_back(c.perm_p2l[p]);
-    for (int p = c.num_qubits_local; p < c.num_qubits; ++p)
+    for (int p = c.num_qubits - 1; p >= c.num_qubits_local; --p)
         expected.push_back(c.perm_p2l[p]);
     qcs_simulator_measure_many_to_clbits_cxx(
         sim, targets.data(), c.num_qubits, clbits.data(), c.num_qubits, bits.data());
     require(c.measured_0_qubit_num_logical_list == expected,
-            "measurement order must be local high-to-low, then global low-to-high");
+            "measurement order must be local high-to-low, then global high-to-low");
 }
 
 inline void lifecycle(qcs_simulator* sim) {

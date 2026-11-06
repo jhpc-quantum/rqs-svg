@@ -138,7 +138,7 @@ qubits in the Z basis and returns one correlated result per input element.
 classical bit at the corresponding position in its destination list.  The two
 counts must match and destinations must be distinct.  An empty request is a
 successful no-op. Using the current logical-to-physical mapping, the `_to_clbits`
-variant orders targets by descending local physical index, followed by ascending
+variant orders targets by descending local physical index, followed by descending
 global physical index, then forms measurement groups. Results and classical bit
 destinations still correspond to the original input positions.
 

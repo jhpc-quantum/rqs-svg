@@ -18,7 +18,7 @@ logical targets. `measure_group_size` near the top of `src/qcs.cu` selects width
 1–4, with a maximum and default of four; a remainder is measured together as a
 smaller group. Edit the constant and rebuild to change the width.
 `qcs_simulator_measure_many_to_clbits` uses the current mapping to order local
-targets by descending physical index, followed by global targets by ascending
+targets by descending physical index, followed by global targets by descending
 physical index, before forming groups. It restores caller order for results and
 classical bit destinations. `qcs_simulator_measure_many` forms groups in caller order.
 

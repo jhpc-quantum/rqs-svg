@@ -203,7 +203,7 @@ int qcs_simulator_measure_to_clbit(qcs_simulator *sim, bit_num_t qubit_num, bit_
  */
 int qcs_simulator_measure_many(qcs_simulator *sim, const bit_num_t *qubit_num_list, bit_num_t qubit_num_count, bit_t *results);
 /* Measures local qubits in descending physical order, then global qubits in
- * ascending physical order, using the current mapping. Assigns results[i] to
+ * descending physical order, using the current mapping. Assigns results[i] to
  * clbit_num_list[i]. Results retain input order. Counts must match.
  */
 int qcs_simulator_measure_many_to_clbits(qcs_simulator *sim, const bit_num_t *qubit_num_list, bit_num_t qubit_num_count, const bit_num_t *clbit_num_list, bit_num_t clbit_num_count, bit_t *results);

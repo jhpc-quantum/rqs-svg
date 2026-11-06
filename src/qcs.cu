@@ -3102,7 +3102,7 @@ void qcs_simulator_measure_many_to_clbits_cxx(
                   bool const local_b = physical_b < sim->core->num_qubits_local;
                   if (local_a != local_b)
                       return local_a;
-                  return local_a ? physical_a > physical_b : physical_a < physical_b;
+                  return physical_a > physical_b;
               });
     std::vector<int> sorted_qubits;
     sorted_qubits.reserve(qubits.size());
