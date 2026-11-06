@@ -1084,6 +1084,80 @@ namespace qcs
 
 #endif
 
+    namespace rank_sampling_detail
+    {
+        constexpr uint64_t chunk_size = 4096;
+
+        // One block per contiguous chunk. Storage scales with state size, never
+        // with the number of requested outcomes. No state is projected here.
+        __global__ void chunk_weights(const complex_t* state, uint64_t count,
+                                     uint64_t mask, uint64_t value, bool active,
+                                     double* weights, double* uniform,
+                                     uint64_t seed, uint64_t counter)
+        {
+            __shared__ double partial[256];
+            if (blockIdx.x == 0 && threadIdx.x == 0)
+            {
+                auto bits = measurement_detail::measurement_random(seed, counter);
+                *uniform = double((uint64_t(bits.x) << 21) | (uint64_t(bits.y) >> 11)) * 0x1.0p-53;
+            }
+            uint64_t chunks = (count + chunk_size - 1) / chunk_size;
+            for (uint64_t chunk = blockIdx.x; chunk < chunks; chunk += gridDim.x)
+            {
+                double sum = 0;
+                uint64_t end = (chunk + 1) * chunk_size;
+                if (end > count) end = count;
+                if (active)
+                    for (uint64_t i = chunk * chunk_size + threadIdx.x; i < end; i += blockDim.x)
+                        if ((i & mask) == value)
+                        {
+                            auto a = state[i];
+                            sum += a.real() * a.real() + a.imag() * a.imag();
+                        }
+                partial[threadIdx.x] = sum;
+                __syncthreads();
+                for (int stride = 128; stride; stride >>= 1)
+                {
+                    if (threadIdx.x < stride) partial[threadIdx.x] += partial[threadIdx.x + stride];
+                    __syncthreads();
+                }
+                if (threadIdx.x == 0) weights[chunk] = partial[0];
+                __syncthreads();
+            }
+        }
+
+        __global__ void sample_chunk(const complex_t* state, uint64_t count,
+                                     uint64_t chunk, uint64_t mask, uint64_t value,
+                                     double fraction, uint64_t* result)
+        {
+            uint64_t begin = chunk * chunk_size, end = begin + chunk_size;
+            if (end > count) end = count;
+            // Use the same serial accumulation for total and CDF so rounding in
+            // the parallel chunk reduction cannot select an impossible basis.
+            double total = 0;
+            for (uint64_t i = begin; i < end; ++i)
+                if ((i & mask) == value) {
+                    auto a = state[i];
+                    total += a.real() * a.real() + a.imag() * a.imag();
+                }
+            *result = UINT64_MAX;
+            if (!isfinite(total) || !(total > 0)) return;
+            double threshold = fraction * total;
+            if (!(threshold < total)) threshold = nextafter(total, 0.0);
+            double cumulative = 0;
+            for (uint64_t i = begin; i < end; ++i)
+                if ((i & mask) == value) {
+                    auto a = state[i];
+                    double w = a.real() * a.real() + a.imag() * a.imag();
+                    if (w > 0) {
+                        *result = i;
+                        cumulative += w;
+                        if (threshold < cumulative) return;
+                    }
+                }
+        }
+    }
+
     struct simulator_core
     {
 
@@ -1127,6 +1201,7 @@ namespace qcs
         // untouched. Exhaustion is separate so UINT64_MAX can be sampled once.
         uint64_t measurement_counter = 0;
         bool measurement_counter_exhausted = false;
+        bool rank_sampled_measurement = false;
 
         int log_num_procs;
         int max_num_qubits_local_device;
@@ -1232,6 +1307,16 @@ namespace qcs
         {
             MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
             MPI_Comm_rank(MPI_COMM_WORLD, &proc_num);
+
+            const char* backend = std::getenv("QCS_MEASUREMENT_BACKEND");
+            int mode = !backend || std::strcmp(backend, "grouped") == 0 ? 0 :
+                       std::strcmp(backend, "rank_sampled") == 0 ? 1 : -1;
+            int low_mode, high_mode;
+            ATLC_CHECK_MPI(MPI_Allreduce, &mode, &low_mode, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            ATLC_CHECK_MPI(MPI_Allreduce, &mode, &high_mode, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            if (low_mode < 0 || low_mode != high_mode)
+                throw std::runtime_error("invalid or inconsistent QCS_MEASUREMENT_BACKEND across ranks");
+            rank_sampled_measurement = mode == 1;
 
             // Check before creating the communicator, including mixed binaries.
             int local_mode = nccl_buffer_mode, min_mode = 0, max_mode = 0;
@@ -2497,9 +2582,130 @@ namespace qcs
             return outcome;
         }
 
+        void measure_rank_sampled(const std::vector<int>& qubits, std::vector<bit_t>& results)
+        {
+            uint64_t requested = 0;
+            for (int q : qubits) requested |= UINT64_C(1) << q;
+            uint64_t fresh = requested & ~measured_mask_logical;
+            uint64_t sampled = measured_value_logical;
+            if (fresh)
+            {
+                if (measurement_counter_exhausted)
+                    throw std::runtime_error("measurement RNG counter exhausted");
+                uint64_t mask = 0, value = 0;
+                bool active = true;
+                for (int q = 0; q < num_qubits; ++q)
+                    if (measured_mask_logical & (UINT64_C(1) << q)) {
+                        int p = perm_l2p[q];
+                        uint64_t b = (measured_value_logical >> q) & 1;
+                        if (p < num_qubits_local) {
+                            mask |= UINT64_C(1) << p;
+                            value |= b << p;
+                        } else if (((uint64_t(proc_num) >> (p - num_qubits_local)) & 1) != b)
+                            active = false;
+                    }
+                size_t chunks = (num_states_local + rank_sampling_detail::chunk_size - 1) /
+                                rank_sampling_detail::chunk_size;
+                double* device = nullptr;
+                ATLC_CHECK_CUDA(cudaMalloc, &device, (chunks + 2) * sizeof(double));
+                ATLC_DEFER_FUNC(cudaFree, device);
+                rank_sampling_detail::chunk_weights<<<std::min<size_t>(chunks, 65535), 256, 0, stream>>>(
+                    state_data_device, num_states_local, mask, value, active,
+                    device, device + chunks, rng_seed, measurement_counter);
+                if (cudaGetLastError() != cudaSuccess)
+                    throw std::runtime_error("rank sampling CUDA launch failed");
+                std::vector<double> weights(chunks + 1);
+                ATLC_CHECK_CUDA(cudaMemcpyAsync, weights.data(), device,
+                                weights.size() * sizeof(double), cudaMemcpyDeviceToHost, stream);
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                long double mass = 0;
+                for (size_t i = 0; i < chunks; ++i) {
+                    if (!std::isfinite(weights[i]) || weights[i] < 0) {
+                        mass = -1;
+                        break;
+                    }
+                    mass += weights[i];
+                }
+                std::vector<long double> masses(num_procs);
+                ATLC_CHECK_MPI(MPI_Allgather, &mass, 1, MPI_LONG_DOUBLE,
+                               masses.data(), 1, MPI_LONG_DOUBLE, MPI_COMM_WORLD);
+                long double total = 0;
+                for (auto w : masses) {
+                    if (!std::isfinite(w) || w < 0)
+                        throw std::runtime_error("invalid measurement probability component");
+                    total += w;
+                }
+                if (!std::isfinite(total) || !(total > 0))
+                    throw std::runtime_error("invalid measurement norm");
+                // Rank zero supplies the authoritative draw, even if seeds differ.
+                double uniform = weights[chunks];
+                ATLC_CHECK_MPI(MPI_Bcast, &uniform, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                auto select = [](const auto& bins, size_t count, long double& threshold) {
+                    size_t last = 0;
+                    for (size_t i = 0; i < count; ++i) if (bins[i] > 0) {
+                        last = i;
+                        if (threshold < bins[i]) return i;
+                        threshold -= bins[i];
+                    }
+                    threshold = std::nextafter(static_cast<long double>(bins[last]), 0.0L);
+                    return last;
+                };
+                long double threshold = std::min(static_cast<long double>(uniform) * total,
+                                                std::nextafter(total, 0.0L));
+                int selected = static_cast<int>(select(masses, masses.size(), threshold));
+                uint64_t index = UINT64_MAX;
+                if (proc_num == selected) {
+                    // Rank CDF residual is already a conditional local draw.
+                    size_t chunk = select(weights, chunks, threshold);
+                    double fraction = static_cast<double>(threshold / weights[chunk]);
+                    fraction = std::min(fraction, std::nextafter(1.0, 0.0));
+                    auto* index_device = reinterpret_cast<uint64_t*>(device + chunks + 1);
+                    try {
+                        rank_sampling_detail::sample_chunk<<<1, 1, 0, stream>>>(
+                            state_data_device, num_states_local, chunk, mask, value, fraction, index_device);
+                        if (cudaGetLastError() != cudaSuccess)
+                            throw std::runtime_error("rank sampling CUDA launch failed");
+                        ATLC_CHECK_CUDA(cudaMemcpyAsync, &index, index_device, sizeof(index),
+                                        cudaMemcpyDeviceToHost, stream);
+                        ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                    } catch (...) {
+                        // Broadcast the failure sentinel so peers cannot wait
+                        // forever when sampling fails only on the chosen rank.
+                        index = UINT64_MAX;
+                    }
+                }
+                ATLC_CHECK_MPI(MPI_Bcast, &index, 1, MPI_UINT64_T, selected, MPI_COMM_WORLD);
+                if (index == UINT64_MAX) throw std::runtime_error("invalid local measurement norm");
+                uint64_t physical = index | (uint64_t(selected) << num_qubits_local);
+                for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {
+                    uint64_t b = (physical >> perm_l2p[q]) & 1;
+                    sampled = (sampled & ~(UINT64_C(1) << q)) | (b << q);
+                    (b ? measured_1_qubit_num_logical_list : measured_0_qubit_num_logical_list).push_back(q);
+                }
+                measured_mask_logical |= fresh;
+                measured_value_logical = sampled;
+                pending_projection_mask_logical |= fresh;
+                if (measurement_counter == UINT64_MAX) measurement_counter_exhausted = true;
+                else ++measurement_counter;
+            }
+            for (size_t i = 0; i < qubits.size(); ++i)
+                results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
+        }
+
+        void measure_many(const std::vector<int>& qubits, std::vector<bit_t>& results)
+        {
+            if (rank_sampled_measurement) measure_rank_sampled(qubits, results);
+            else measure_qubit_groups(qubits, results);
+        }
+
         int measure_qubit(int const qubit)
         {
-            return static_cast<int>(measure_qubits<1>({qubit}));
+            if (!rank_sampled_measurement)
+                return static_cast<int>(measure_qubits<1>({qubit}));
+            if (qubit < 0 || qubit >= num_qubits) throw std::runtime_error("qubit is out of range");
+            std::vector<bit_t> result(1);
+            measure_rank_sampled({qubit}, result);
+            return result[0];
         }
 
         template <size_t group_index>
@@ -3064,7 +3270,7 @@ void qcs_simulator_measure_many_cxx(qcs_simulator *sim, bit_num_t const *qubit_n
 {
     std::vector<int> const qubits = qcs_validate_measure_many(sim, qubit_num_list, qubit_num_count, results);
     std::vector<bit_t> temporary_results(qubits.size());
-    sim->core->measure_qubit_groups(qubits, temporary_results);
+    sim->core->measure_many(qubits, temporary_results);
     if (!temporary_results.empty())
         std::copy(temporary_results.begin(), temporary_results.end(), results);
 }
@@ -3111,7 +3317,7 @@ void qcs_simulator_measure_many_to_clbits_cxx(
         sorted_qubits.push_back(qubits[i]);
 
     std::vector<bit_t> sorted_results(qubits.size());
-    sim->core->measure_qubit_groups(sorted_qubits, sorted_results);
+    sim->core->measure_many(sorted_qubits, sorted_results);
     std::vector<bit_t> temporary_results(qubits.size());
     for (size_t i = 0; i < qubits.size(); ++i)
         temporary_results[measurement_order[i]] = sorted_results[i];

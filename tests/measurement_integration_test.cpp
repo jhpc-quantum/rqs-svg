@@ -36,6 +36,23 @@ int main()
         qcs_simulator_set_mapping_cxx(sim, mapping.data(), n);
         qcs_simulator_allocate_memory_cxx(sim);
 
+#ifdef QCS_PRIVATE_RANK_SAMPLING_CASES
+        check_rank_sampling_metadata(sim);
+#endif
+        // Partial measurement must preserve coherence of an unmeasured qubit.
+        // Gate localization may change its physical position; private coverage
+        // also prepares this state directly with a guaranteed global bit.
+        // The expected Pauli X value for |+> tensor |0> is exactly one.
+        qcs_simulator_set_zero_state_cxx(sim);
+        const bit_num_t coherent = 0, local_zero = 9;
+        qcs_simulator_gate_h_cxx(sim, &coherent, 1, nullptr, 0, nullptr, 0);
+        bit_t zero_result = 1;
+        qcs_simulator_measure_many_cxx(sim, &local_zero, 1, &zero_result);
+        require(zero_result == 0, "local zero measurement");
+        const qcs_pauli_operator px = QCS_PAULI_X;
+        require(std::abs(qcs_simulator_expectation_pauli_cxx(sim, &coherent, &px, 1, 1.0) - 1.0) < 1e-11,
+                "partial local measurement must preserve unmeasured global coherence");
+
         // Reverse mapping places logical zero on a rank bit with MPI. No gate
         // precedes this measurement: it exercises L=0, then inactive ranks.
         qcs_simulator_set_zero_state_cxx(sim);
