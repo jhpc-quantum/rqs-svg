@@ -115,6 +115,22 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    bit_num_t *const bit_num_list = malloc(sizeof(*bit_num_list) * (size_t)num_qubits);
+    bit_t *const results = malloc(sizeof(*results) * (size_t)num_qubits);
+    if (bit_num_list == NULL || results == NULL)
+    {
+        fprintf(stderr, "failed to allocate measurement buffers\n");
+        free(bit_num_list);
+        free(results);
+        free(clbits);
+        qcs_simulator_destroy(sim);
+        return EXIT_FAILURE;
+    }
+    for (bit_num_t i = 0; i < num_qubits; i++)
+    {
+        bit_num_list[i] = i;
+    }
+
     for (int sample_num = 0; sample_num < num_samples; sample_num++)
     {
         qcs_simulator_event_record(sim, event_1);
@@ -129,10 +145,15 @@ int main(int argc, char **argv)
             qcs_simulator_gate_x(sim, x_target, 1, NULL, 0, ctrl, 1);
         }
 
-        for (bit_num_t qubit_num = 0; qubit_num < num_qubits; qubit_num++)
+        if (!qcs_simulator_measure_many_to_clbits(
+                sim, bit_num_list, num_qubits, bit_num_list, num_clbits, results))
         {
-            bit_t measured = 0;
-            qcs_simulator_measure_to_clbit(sim, qubit_num, qubit_num, &measured);
+            fprintf(stderr, "qcs_simulator_measure_many_to_clbits failed\n");
+            free(bit_num_list);
+            free(results);
+            free(clbits);
+            qcs_simulator_destroy(sim);
+            return EXIT_FAILURE;
         }
 
         qcs_simulator_event_record(sim, event_2);
@@ -155,6 +176,8 @@ int main(int argc, char **argv)
         }
     }
 
+    free(bit_num_list);
+    free(results);
     free(clbits);
     qcs_simulator_destroy(sim);
     return EXIT_SUCCESS;

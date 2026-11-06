@@ -40,9 +40,32 @@ void circuit_run(qcs_simulator *sim)
         qcs_simulator_gate_x(sim, target, 1, NULL, 0, ctrl, 1);
     }
 
-    for (bit_num_t qubit_num = 0; qubit_num < num_qubits; qubit_num++)
+    bit_num_t *bit_num_list = NULL;
+    bit_t *results = NULL;
+    if (num_qubits > 0)
     {
-        bit_t measured = 0;
-        qcs_simulator_measure_to_clbit(sim, qubit_num, qubit_num, &measured);
+        bit_num_list = malloc(sizeof(*bit_num_list) * (size_t)num_qubits);
+        results = malloc(sizeof(*results) * (size_t)num_qubits);
+        if (bit_num_list == NULL || results == NULL)
+        {
+            fprintf(stderr, "failed to allocate measurement buffers\n");
+            free(bit_num_list);
+            free(results);
+            exit(EXIT_FAILURE);
+        }
+        for (bit_num_t i = 0; i < num_qubits; i++)
+        {
+            bit_num_list[i] = i;
+        }
+    }
+
+    int ok = qcs_simulator_measure_many_to_clbits(
+        sim, bit_num_list, num_qubits, bit_num_list, num_clbits, results);
+    free(bit_num_list);
+    free(results);
+    if (!ok)
+    {
+        fprintf(stderr, "qcs_simulator_measure_many_to_clbits failed\n");
+        exit(EXIT_FAILURE);
     }
 }
