@@ -24,6 +24,16 @@ gcc -fPIC -shared user_circuit.c -o user_circuit.so
 
 The loadable circuit examples live under [`examples/standalone/`](../examples/standalone/).
 
+[`measure-only.c`](../examples/standalone/measure-only.c) measures all qubits
+into their corresponding classical bits without applying any gates. With the
+default zero initial state, every measured bit is zero. Set `NUM_QUBITS` to
+the desired qubit count:
+
+```sh
+./compile_circuit.sh examples/standalone/measure-only.c -o measure-only.so
+NUM_QUBITS=3 mpirun -np 1 ./bin/qcs --num-samples 10 measure-only.so
+```
+
 ## Running
 
 Use one MPI rank per GPU. Replace `NUM_GPUS` with the desired rank count.
