@@ -202,7 +202,9 @@ int qcs_simulator_measure_to_clbit(qcs_simulator *sim, bit_num_t qubit_num, bit_
  * successful no-op and permits NULL list/result pointers.
  */
 int qcs_simulator_measure_many(qcs_simulator *sim, const bit_num_t *qubit_num_list, bit_num_t qubit_num_count, bit_t *results);
-/* As above, then assigns results[i] to clbit_num_list[i].  Counts must match. */
+/* Measures in descending logical qubit order, then assigns results[i] to
+ * clbit_num_list[i]. Results retain input order. Counts must match.
+ */
 int qcs_simulator_measure_many_to_clbits(qcs_simulator *sim, const bit_num_t *qubit_num_list, bit_num_t qubit_num_count, const bit_num_t *clbit_num_list, bit_num_t clbit_num_count, bit_t *results);
 int qcs_simulator_read(qcs_simulator *sim, bit_num_t clbit_num, bit_t *result);
 int qcs_simulator_save_statevector(qcs_simulator *sim, const char *outfn);

@@ -3102,8 +3102,21 @@ void qcs_simulator_measure_many_to_clbits_cxx(
         used[clbit_num] = true;
     }
 
+    std::vector<size_t> measurement_order(qubits.size());
+    for (size_t i = 0; i < qubits.size(); ++i)
+        measurement_order[i] = i;
+    std::sort(measurement_order.begin(), measurement_order.end(),
+              [&](size_t a, size_t b) { return qubits[a] > qubits[b]; });
+    std::vector<int> sorted_qubits;
+    sorted_qubits.reserve(qubits.size());
+    for (size_t const i : measurement_order)
+        sorted_qubits.push_back(qubits[i]);
+
+    std::vector<bit_t> sorted_results(qubits.size());
+    sim->core->measure_qubit_groups(sorted_qubits, sorted_results);
     std::vector<bit_t> temporary_results(qubits.size());
-    sim->core->measure_qubit_groups(qubits, temporary_results);
+    for (size_t i = 0; i < qubits.size(); ++i)
+        temporary_results[measurement_order[i]] = sorted_results[i];
     for (size_t i = 0; i < qubits.size(); ++i)
         sim->clbits[clbit_num_list[i]] = temporary_results[i];
     if (!temporary_results.empty())

@@ -139,11 +139,16 @@ inline void lifecycle(qcs_simulator* sim) {
     measure(sim, {0, 1}); ++expected; check();
     // Under reverse mapping the first control excludes half the ranks.
     measure(sim, {2, 3, 4, 5, 6}); expected += 2; check();
-    const bit_num_t targets[] = {7, 8, 9, 10, 11};
+    const bit_num_t targets[] = {8, 11, 7, 10, 9};
     const bit_num_t clbits[] = {4, 3, 2, 1, 0};
     bit_t bits[5]{};
     qcs_simulator_measure_many_to_clbits_cxx(sim, targets, 5, clbits, 5, bits);
     expected += 2; check();
+    const auto& measured_zero = c.measured_0_qubit_num_logical_list;
+    require(measured_zero.size() >= 5 &&
+            std::equal(measured_zero.end() - 5, measured_zero.end(),
+                       std::vector<int>{11, 10, 9, 8, 7}.begin()),
+            "classical-bit measurement must visit higher logical qubits first");
     qcs_simulator_measure_many_to_clbits_cxx(sim, targets, 5, clbits, 5, bits); check();
     auto* data = c.measurement_workspace->data();
     auto capacity = c.measurement_workspace->capacity();

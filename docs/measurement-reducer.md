@@ -17,13 +17,16 @@ The [public measurement API](usage.md#measuring-multiple-qubits) accepts ordered
 logical targets. `measure_group_size` near the top of `src/qcs.cu` selects widths
 1–4, with a maximum and default of four; a remainder is measured together as a
 smaller group. Edit the constant and rebuild to change the width.
+`qcs_simulator_measure_many_to_clbits` sorts targets by descending logical qubit
+index before forming groups and restores caller order for results and classical
+bit destinations. `qcs_simulator_measure_many` forms groups in caller order.
 
 Global-only targets use rank bits without exchanging amplitudes or changing the
 mapping. Already measured targets retain recorded values, and entirely cached
 groups need no collective or draw. Projection remains deferred until a gate or
 statevector output requires it. Unsorted targets and logical-to-physical mappings
 retain caller-order output positions; the first target is the least significant
-bit of the internal joint outcome.
+bit of the internal joint outcome within each measurement group.
 
 ## Algorithm and ownership
 
