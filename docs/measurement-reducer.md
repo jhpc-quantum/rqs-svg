@@ -48,8 +48,14 @@ bits to enumerate eligible physical indices in ascending order. Each amplitude
 contributes its squared norm to one of `2^N` raw probability bins. L=0 is valid;
 impossible bins and excluded ranks contribute exact zeros.
 
-The launch policy remains S=256 threads and G=8*SM_count blocks in both stages.
-Stage one writes `partials[bin*G + block]`; stage two reads using that actual G.
+The launch policy uses S=256 threads and
+`G=min(8*SM_count, ceil(active_count/256))` first-stage blocks. Large workloads
+retain the previous grid cap; each launched block has at least one active item.
+Stage one writes `partials[bin*G + block]`. Stage two launches exactly `2^N`
+blocks (one per bin), receiving G explicitly as its partial count and stride.
+Workspace capacity and the output offset retain the maximum `8*SM_count`
+layout, including for `enqueue_zero`; unused partial storage is never read.
+See [adaptive launch validation](measurement-launch.md) for status and benchmarks.
 Dynamic shared bytes are `256 * 2^N * sizeof(double)` (32 KiB at N=4), plus
 compiled static scratch. Exact kernel limits, opt-in shared capacity, and nonzero
 occupancy are checked when reserving workspace (at simulator allocation time,

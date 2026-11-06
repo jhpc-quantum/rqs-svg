@@ -18,12 +18,13 @@
 #include <stdexcept>
 #include <string>
 #include "work_buffer.hpp"
+#include "measurement_launch.hpp"
 
 namespace qcs::measurement_detail
 {
 using real_type = double;
 using state_type = cuda::std::complex<real_type>;
-constexpr unsigned block_size = 256;
+constexpr unsigned block_size = measurement_block_size;
 constexpr uint64_t blocks_per_sm = 8;
 static_assert(block_size >= 32 && block_size <= 1024 && block_size % 32 == 0,
               "measurement reduction requires complete warps");
@@ -177,11 +178,11 @@ __global__ void first_stage(const state_type* state, packed_descriptor<N> d, dou
 }
 
 template<int N>
-__global__ void second_stage(const double* partials, double* output)
+__global__ void second_stage(const double* partials, double* output, uint64_t partial_blocks)
 {
     __shared__ double scratch[block_size / 32];
-    const uint64_t blocks = gridDim.x; // G is the partial stride in BOTH stages.
-    for (uint64_t bin = blockIdx.x; bin < (UINT64_C(1) << N); bin += blocks)
+    const uint64_t blocks = partial_blocks; // First-stage bin-major stride.
+    for (uint64_t bin = blockIdx.x; bin < (UINT64_C(1) << N); bin += gridDim.x)
     {
         double value = 0;
         for (uint64_t block = threadIdx.x; block < blocks; block += block_size)
@@ -475,9 +476,11 @@ public:
         auto config = reserve<N>(stream);
         uint64_t partial_elements = checked_product(UINT64_C(1) << N, config.blocks);
         double* output = data_ + partial_elements;
-        first_stage<N><<<config.blocks, block_size, config.dynamic_shared, stream>>>(state, packed, data_);
+        // Capacity/output offset stay at the maximum; only live partials are packed.
+        const unsigned blocks = measurement_blocks(packed.active_count, config.blocks);
+        first_stage<N><<<blocks, block_size, config.dynamic_shared, stream>>>(state, packed, data_);
         ATLC_CHECK_CUDA(cudaGetLastError);
-        second_stage<N><<<config.blocks, block_size, 0, stream>>>(data_, output);
+        second_stage<N><<<(1u << N), block_size, 0, stream>>>(data_, output, blocks);
         ATLC_CHECK_CUDA(cudaGetLastError);
         return output;
     }

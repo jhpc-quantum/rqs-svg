@@ -32,7 +32,7 @@ else:
     source = replace_once(source, collective, collective + '\n            if (measurement_probe::observer) measurement_probe::observer(N, qubits.data(), local_norm.data(), global_norm.data());')
 custom = 'measurement_workspace->enqueue<N>' in source
 a.output.mkdir(parents=True, exist_ok=True)
-for name in ('work_buffer.hpp', 'work_buffer.cuh', 'nccl_buffer.cuh', 'swap_launch.hpp', 'pauli_reduce.cuh', 'pauli_string.hpp'):
+for name in ('measurement_launch.hpp', 'work_buffer.hpp', 'work_buffer.cuh', 'nccl_buffer.cuh', 'swap_launch.hpp', 'pauli_reduce.cuh', 'pauli_string.hpp'):
     header_path = a.source / 'src' / name
     if header_path.exists():
         header = header_path.read_text()
@@ -43,6 +43,9 @@ if custom:
     header = (a.source / 'src/measurement_reduce.cuh').read_text()
     start = '        first_stage<N><<<config.blocks, block_size, config.dynamic_shared, stream>>>(state, packed, data_);'
     end = '        second_stage<N><<<config.blocks, block_size, 0, stream>>>(data_, output);\n        ATLC_CHECK_CUDA(cudaGetLastError);'
+    if 'measurement_blocks(packed.active_count' in header:
+        start = '        first_stage<N><<<blocks, block_size, config.dynamic_shared, stream>>>(state, packed, data_);'
+        end = '        second_stage<N><<<(1u << N), block_size, 0, stream>>>(data_, output, blocks);\n        ATLC_CHECK_CUDA(cudaGetLastError);'
     header = replace_once(header, start, '        measurement_probe::begin(stream);\n' + start)
     header = replace_once(header, end, end + '\n        measurement_probe::end(stream);')
     (a.output / 'measurement_reduce.cuh').write_text(header)

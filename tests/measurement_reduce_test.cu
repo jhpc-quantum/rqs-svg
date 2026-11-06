@@ -175,6 +175,34 @@ void fixtures(md::workspace& workspace, device_state& input, size_t large_count)
     }
 }
 
+// Consecutive groups shrink the live stride in the same poisoned/reused buffer.
+// Permuted physical order makes controls noncontiguous during the sweep.
+template<int N>
+void shrinking_groups(md::workspace& workspace, device_state& input)
+{
+    auto state = nonuniform(4096);
+    md::descriptor<N> d;
+    const int order[] = {11, 0, 9, 2, 7, 4, 5, 6, 3, 8, 1, 10};
+    for (int begin = 0; begin < 12; begin += N)
+    {
+        d.local_targets = std::min(N, 12 - begin);
+        for (int j = 0; j < d.local_targets; ++j)
+        {
+            d.local_target_physical[j] = order[begin + j];
+            d.local_outcome_bits[j] = j;
+        }
+        compare(workspace, input, state, d, begin == 0);
+        for (int j = 0; j < d.local_targets; ++j)
+        {
+            uint64_t bit = UINT64_C(1) << d.local_target_physical[j];
+            d.control_mask |= bit;
+            if ((begin + j) % 2) d.control_value |= bit;
+        }
+    }
+    d.local_targets = 0;
+    compare(workspace, input, state, d, false); // one remaining active element
+}
+
 void analytic_order(md::workspace& workspace, device_state& input)
 {
     std::vector<State> state(8);
@@ -281,6 +309,10 @@ int main()
             uint64_t stride = md::checked_product(config.blocks, md::block_size);
             while (large / 4 <= stride)
                 large = md::checked_product(large, 2);
+            shrinking_groups<1>(workspace, input);
+            shrinking_groups<2>(workspace, input);
+            shrinking_groups<3>(workspace, input);
+            shrinking_groups<4>(workspace, input);
             analytic_order(workspace, input);
             fixtures<1>(workspace, input, large);
             fixtures<2>(workspace, input, large);
