@@ -32,7 +32,7 @@ else:
     source = replace_once(source, collective, collective + '\n            if (measurement_probe::observer) measurement_probe::observer(N, qubits.data(), local_norm.data(), global_norm.data());')
 custom = 'measurement_workspace->enqueue<N>' in source
 a.output.mkdir(parents=True, exist_ok=True)
-for name in ('measurement_profile.hpp', 'measurement_launch.hpp', 'work_buffer.hpp', 'work_buffer.cuh', 'nccl_buffer.cuh', 'swap_launch.hpp', 'pauli_reduce.cuh', 'pauli_string.hpp'):
+for name in ('measurement_backend.hpp', 'measurement_profile.hpp', 'measurement_launch.hpp', 'work_buffer.hpp', 'work_buffer.cuh', 'nccl_buffer.cuh', 'swap_launch.hpp', 'pauli_reduce.cuh', 'pauli_string.hpp'):
     header_path = a.source / 'src' / name
     if header_path.exists():
         header = header_path.read_text()

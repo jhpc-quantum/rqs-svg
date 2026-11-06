@@ -5,6 +5,14 @@
 static void check_rank_sampling_metadata(qcs_simulator* sim)
 {
     auto& c = *sim->core;
+    // Explicit selection must override workload size, including cached requests.
+    std::vector<int> dispatch_targets{0};
+    if (!c.auto_measurement) {
+        if (c.use_rank_sampling(dispatch_targets) != c.rank_sampled_measurement)
+            throw std::runtime_error("explicit backend dispatch regression");
+    } else if (c.use_rank_sampling(dispatch_targets)) {
+        throw std::runtime_error("auto single-target dispatch regression");
+    }
     if (!c.rank_sampled_measurement) return;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("rank sampling metadata regression"); };
     c.initialize_selected_state();

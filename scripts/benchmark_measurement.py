@@ -36,7 +36,7 @@ def run(command, **kwargs):
 if not a.no_build:
     with (out/'build.log').open('w') as log:
         run(['make', str(a.binary)], stdout=log, stderr=subprocess.STDOUT)
-for backend in ('grouped','rank_sampled'):
+for backend in ('grouped','rank_sampled','auto'):
     with (out/(backend+'.csv')).open('w') as data, (out/(backend+'.log')).open('w') as log:
         run(shlex.split(a.mpiexec)+['-n',str(a.ranks),str((root/a.binary).resolve()),str(a.qubits),str(a.warmups),str(a.repetitions)],
             env=os.environ | {'QCS_MEASUREMENT_BACKEND':backend}, stdout=data, stderr=log)

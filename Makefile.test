@@ -215,3 +215,16 @@ measurement-backend-profile: $(MEASUREMENT_BACKEND_PROFILE)
 # Private source-copy builds also consume the compile-time profiling header.
 $(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST): src/measurement_profile.hpp
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_profile.hpp
+
+MEASUREMENT_BACKEND_TEST ?= bin/measurement_backend_test
+$(MEASUREMENT_BACKEND_TEST): tests/measurement_backend_test.cpp src/measurement_backend.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-measurement-backend
+test-measurement-backend: $(MEASUREMENT_BACKEND_TEST)
+	$(MEASUREMENT_BACKEND_TEST)
+
+TEST_BINARIES += $(MEASUREMENT_BACKEND_TEST)
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST): src/measurement_backend.hpp
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_backend.hpp

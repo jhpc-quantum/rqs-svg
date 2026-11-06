@@ -1,4 +1,5 @@
 #include "measurement_profile.hpp"
+#include "measurement_backend.hpp"
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
@@ -1089,6 +1090,38 @@ namespace qcs
     {
         constexpr uint64_t chunk_size = 4096;
 
+        // Lazy, simulator-owned storage; calls are serialized on the owner stream.
+        struct workspace
+        {
+            double* device = nullptr;
+            size_t capacity = 0;
+            std::vector<double> weights;
+            std::vector<long double> exchange, masses;
+
+            workspace() = default;
+            workspace(const workspace&) = delete;
+            workspace& operator=(const workspace&) = delete;
+
+            void reserve(size_t chunks, int ranks)
+            {
+                weights.resize(chunks + 1);
+                exchange.resize(size_t(ranks) * 2);
+                masses.resize(ranks);
+                if (capacity >= chunks + 2) return;
+                double* replacement = nullptr;
+                ATLC_CHECK_CUDA(cudaMalloc, &replacement, (chunks + 2) * sizeof(double));
+                if (device) cudaFree(device);
+                device = replacement;
+                capacity = chunks + 2;
+            }
+            void close()
+            {
+                if (device) { ATLC_CHECK_CUDA(cudaFree, device); device = nullptr; }
+                capacity = 0;
+            }
+            ~workspace() { if (device) cudaFree(device); }
+        };
+
         // One block per contiguous chunk. Storage scales with state size, never
         // with the number of requested outcomes. No state is projected here.
         __global__ void chunk_weights(const complex_t* state, uint64_t count,
@@ -1096,7 +1129,7 @@ namespace qcs
                                      double* weights, double* uniform,
                                      uint64_t seed, uint64_t counter)
         {
-            __shared__ double partial[256];
+            __shared__ double partial[8];
             if (blockIdx.x == 0 && threadIdx.x == 0)
             {
                 auto bits = measurement_detail::measurement_random(seed, counter);
@@ -1115,14 +1148,18 @@ namespace qcs
                             auto a = state[i];
                             sum += a.real() * a.real() + a.imag() * a.imag();
                         }
-                partial[threadIdx.x] = sum;
+                // One warp shuffle reduction and eight shared partials replace
+                // the full-block shared-memory reduction tree.
+                unsigned lane = threadIdx.x % 32, warp = threadIdx.x / 32;
+                sum = measurement_detail::warp_sum(sum);
+                if (lane == 0) partial[warp] = sum;
                 __syncthreads();
-                for (int stride = 128; stride; stride >>= 1)
-                {
-                    if (threadIdx.x < stride) partial[threadIdx.x] += partial[threadIdx.x + stride];
-                    __syncthreads();
+                double total = 0;
+                if (warp == 0) {
+                    total = lane < 8 ? partial[lane] : 0.0;
+                    total = measurement_detail::warp_sum(total);
                 }
-                if (threadIdx.x == 0) weights[chunk] = partial[0];
+                if (threadIdx.x == 0) weights[chunk] = total;
                 __syncthreads();
             }
         }
@@ -1203,6 +1240,8 @@ namespace qcs
         uint64_t measurement_counter = 0;
         bool measurement_counter_exhausted = false;
         bool rank_sampled_measurement = false;
+        bool auto_measurement = false;
+        rank_sampling_detail::workspace rank_sampling_workspace;
 
         int log_num_procs;
         int max_num_qubits_local_device;
@@ -1311,13 +1350,15 @@ namespace qcs
 
             const char* backend = std::getenv("QCS_MEASUREMENT_BACKEND");
             int mode = !backend || std::strcmp(backend, "grouped") == 0 ? 0 :
-                       std::strcmp(backend, "rank_sampled") == 0 ? 1 : -1;
+                       std::strcmp(backend, "rank_sampled") == 0 ? 1 :
+                       std::strcmp(backend, "auto") == 0 ? 2 : -1;
             int low_mode, high_mode;
             ATLC_CHECK_MPI(MPI_Allreduce, &mode, &low_mode, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             ATLC_CHECK_MPI(MPI_Allreduce, &mode, &high_mode, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
             if (low_mode < 0 || low_mode != high_mode)
                 throw std::runtime_error("invalid or inconsistent QCS_MEASUREMENT_BACKEND across ranks");
             rank_sampled_measurement = mode == 1;
+            auto_measurement = mode == 2;
 
             // Check before creating the communicator, including mixed binaries.
             int local_mode = nccl_buffer_mode, min_mode = 0, max_mode = 0;
@@ -1707,6 +1748,7 @@ namespace qcs
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
             deregister_nccl_buffer(nccl_comm, scratch_registration);
             deregister_nccl_buffer(nccl_comm, state_registration);
+            rank_sampling_workspace.close();
             pauli_workspace.reset();
             if (measurement_workspace)
             {
@@ -2615,9 +2657,11 @@ namespace qcs
                     }
                 size_t chunks = (num_states_local + rank_sampling_detail::chunk_size - 1) /
                                 rank_sampling_detail::chunk_size;
-                double* device = nullptr;
-                ATLC_CHECK_CUDA(cudaMalloc, &device, (chunks + 2) * sizeof(double));
-                ATLC_DEFER_FUNC(cudaFree, device);
+                rank_sampling_workspace.reserve(chunks, num_procs);
+                double* device = rank_sampling_workspace.device;
+                auto& weights = rank_sampling_workspace.weights;
+                auto& masses = rank_sampling_workspace.masses;
+                auto& exchange = rank_sampling_workspace.exchange;
                 QCS_MEASURE_STAGE("rank_sampled.local_mass");
                 rank_sampling_detail::chunk_weights<<<std::min<size_t>(chunks, 65535), 256, 0, stream>>>(
                     state_data_device, num_states_local, mask, value, active,
@@ -2625,7 +2669,6 @@ namespace qcs
                 if (cudaGetLastError() != cudaSuccess)
                     throw std::runtime_error("rank sampling CUDA launch failed");
                 QCS_MEASURE_STAGE("rank_sampled.device_to_host_and_wait");
-                std::vector<double> weights(chunks + 1);
                 ATLC_CHECK_CUDA(cudaMemcpyAsync, weights.data(), device,
                                 weights.size() * sizeof(double), cudaMemcpyDeviceToHost, stream);
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
@@ -2638,11 +2681,14 @@ namespace qcs
                     }
                     mass += weights[i];
                 }
-                std::vector<long double> masses(num_procs);
+                // Include the authoritative rank-zero draw in the mass exchange:
+                // no separate broadcast or rank-dependent dispatch collective.
+                long double payload[2] = {mass, static_cast<long double>(weights[chunks])};
                 QCS_MEASURE_STAGE("rank_sampled.rank_mass_collection");
-                ATLC_CHECK_MPI(MPI_Allgather, &mass, 1, MPI_LONG_DOUBLE,
-                               masses.data(), 1, MPI_LONG_DOUBLE, MPI_COMM_WORLD);
-                QCS_MEASURE_STAGE("rank_sampled.rank_selection_and_draw_broadcast");
+                ATLC_CHECK_MPI(MPI_Allgather, payload, 2, MPI_LONG_DOUBLE,
+                               exchange.data(), 2, MPI_LONG_DOUBLE, MPI_COMM_WORLD);
+                for (int rank = 0; rank < num_procs; ++rank) masses[rank] = exchange[2 * rank];
+                QCS_MEASURE_STAGE("rank_sampled.rank_selection");
                 long double total = 0;
                 for (auto w : masses) {
                     if (!std::isfinite(w) || w < 0)
@@ -2652,8 +2698,7 @@ namespace qcs
                 if (!std::isfinite(total) || !(total > 0))
                     throw std::runtime_error("invalid measurement norm");
                 // Rank zero supplies the authoritative draw, even if seeds differ.
-                double uniform = weights[chunks];
-                ATLC_CHECK_MPI(MPI_Bcast, &uniform, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                double uniform = static_cast<double>(exchange[1]);
                 auto select = [](const auto& bins, size_t count, long double& threshold) {
                     size_t last = 0;
                     for (size_t i = 0; i < count; ++i) if (bins[i] > 0) {
@@ -2709,17 +2754,38 @@ namespace qcs
                 results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
         }
 
+        bool use_rank_sampling(const std::vector<int>& qubits) const
+        {
+            if (!auto_measurement) return rank_sampled_measurement;
+            measurement_detail::backend_workload workload{};
+            workload.ranks = num_procs;
+            workload.local_states = num_states_local;
+            for (int q = 0; q < num_qubits; ++q) {
+                if (!(measured_mask_logical & (UINT64_C(1) << q))) continue;
+                if (perm_l2p[q] < num_qubits_local) ++workload.measured_local;
+                else ++workload.measured_global;
+            }
+            for (int q : qubits) {
+                if (measured_mask_logical & (UINT64_C(1) << q)) continue;
+                if (perm_l2p[q] < num_qubits_local) ++workload.fresh_local;
+                else ++workload.fresh_global;
+            }
+            // Only replicated metadata enters dispatch; never rank-local mass,
+            // control compatibility, RNG state, or observed runtime timings.
+            return measurement_detail::prefer_rank_sampling(workload);
+        }
+
         void measure_many(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
-            if (rank_sampled_measurement) measure_rank_sampled(qubits, results);
+            if (use_rank_sampling(qubits)) measure_rank_sampled(qubits, results);
             else measure_qubit_groups(qubits, results);
         }
 
         int measure_qubit(int const qubit)
         {
-            if (!rank_sampled_measurement)
-                return static_cast<int>(measure_qubits<1>({qubit}));
             if (qubit < 0 || qubit >= num_qubits) throw std::runtime_error("qubit is out of range");
+            if (!use_rank_sampling({qubit}))
+                return static_cast<int>(measure_qubits<1>({qubit}));
             std::vector<bit_t> result(1);
             measure_rank_sampled({qubit}, result);
             return result[0];

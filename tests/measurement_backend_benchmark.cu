@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
             if (!c.proc_num) {
                 const char* layouts[] = {"local", "global", "mixed", "full"};
                 const char* modes[] = {"none", "partial", "all"};
-                std::cout << (c.rank_sampled_measurement ? "rank_sampled" : "grouped") << ',' << n << ','
+                std::cout << (c.auto_measurement ? "auto" : c.rank_sampled_measurement ? "rank_sampled" : "grouped") << ',' << n << ','
                     << c.num_procs << ',' << nodes << ',' << states[kind] << ',' << count << ',' << layouts[layout]
                     << ',' << modes[deferred] << ',' << warmups << ',' << repetitions << std::setprecision(12);
                 for (double p : {0.1,0.5,0.9}) std::cout << ',' << percentile(samples,p);
