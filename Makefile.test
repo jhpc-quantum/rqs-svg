@@ -228,3 +228,14 @@ test-measurement-backend: $(MEASUREMENT_BACKEND_TEST)
 TEST_BINARIES += $(MEASUREMENT_BACKEND_TEST)
 $(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST): src/measurement_backend.hpp
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_backend.hpp
+
+TILED_CDF_TEST ?= bin/measurement_tiled_cdf_test
+$(TILED_CDF_TEST): tests/measurement_tiled_cdf_test.cu src/measurement_tiled_cdf.cuh
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(LDFLAGS_VENDOR) --cudart=shared
+
+.PHONY: test-measurement-tiled-cdf
+test-measurement-tiled-cdf: $(TILED_CDF_TEST)
+	./$(TILED_CDF_TEST)
+
+TEST_BINARIES += $(TILED_CDF_TEST)

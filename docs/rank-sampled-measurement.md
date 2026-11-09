@@ -86,3 +86,6 @@ benchmark/profiling data is available in this repository. Auto remains opt-in
 until correctness and performance are validated on the target hardware. Backend
 choice can change RNG consumption and seeded trajectories, while preserving the
 measurement distribution and metadata semantics.
+
+Independent GPU primitives for the planned tiled-CDF backend are documented in
+[tiled CDF primitives](tiled-cdf-primitives.md); they do not change this backend.
