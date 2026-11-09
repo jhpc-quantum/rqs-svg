@@ -28,7 +28,7 @@ and fit device shared-memory limits when tuning it.
 
 Each tile block loads adjacent amplitudes coalescently, computes FP64 squared
 magnitudes with explicit round-to-nearest operations, and reduces them using a
-fixed parallel prefix tree. Masked/padded amplitudes contribute zero without
+fixed total-reduction tree. Masked/padded amplitudes contribute zero without
 loading state; inactive ranks never dereference state, even if it is null.
 A single block scans metadata in batches of 256 with a fixed carry order.
 This avoids toolkit-dependent device-wide floating-point scan behavior and
@@ -87,3 +87,34 @@ compilation because `nvcc` was not installed (make exit 2, compiler launch error
 unverified and must be checked on the target CUDA system.
 
 The distributed opt-in backend is described in [Tiled CDF measurement](tiled-cdf-measurement.md).
+
+## Mass reduction optimization
+
+The mass kernel prunes the Hillis-Steele scan to the ancestors of its final
+4096th element. It combines adjacent subtrees, adding the right subtree to the
+left with `__dadd_rn`, exactly as the original final scan value does. The first
+seven levels use disjoint shared-memory endpoints; the last five use one warp's
+shuffle instructions. There is no change in summation order or FP64 rounding.
+The selected-tile scan and metadata scan remain unchanged.
+
+Per tile, additions decrease from 45,057 to 4,095 and block barriers from 26 to
+9, including loading and inter-tile reuse. Shared storage remains 32 KiB; only
+surviving endpoints are read and written during reduction. These operation
+counts are not measured speedups.
+
+The focused CUDA test retains the original mass kernel and compares every tile
+mass bit for bit and its invalid-weight status, including grid-stride reuse.
+Fixtures cover nonuniform, sparse, zero, masked, inactive, overflow and widely
+varying weights, plus small contributions near FP64 rounding boundaries. The
+existing long-double mass tolerance of 1e-13 relative and sampling checks remain
+unchanged.
+
+For this optimization, host backend, launch and work-buffer tests passed, as did
+100 host comparisons of the full scan and pruned tree. CUDA primitive, reducer
+and integration tests and the complete API benchmark could not compile because
+`nvcc` is unavailable; `nvidia-smi` is also unavailable. No kernel or API timings
+were obtained. On a CUDA system, compare CUDA-event timings of `original_masses`
+and `td::masses` from the focused test using identical warmed inputs and launch
+geometry. Use `benchmark-measurement-backends BENCH_BACKENDS=tiled_cdf` on the
+parent and optimized revisions for complete API measurements, with identical
+rank counts, qubits, warmups and repetitions.

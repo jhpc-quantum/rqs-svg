@@ -61,8 +61,25 @@ __global__ void masses(const state_type* state, uint64_t count, uint64_t mask,
             sums[j] = w;
         }
         __syncthreads();
-        scan<tile_size>(sums);
-        if (threadIdx.x == 0) mass[t] = sums[tile_size-1];
+        // Keep only the ancestors of the old scan's final element. Each
+        // subtree adds its right half to its left half, with the same rounding.
+        for (unsigned stride = 2; stride <= tile_size / 32; stride *= 2) {
+            for (unsigned i = threadIdx.x; i < tile_size / stride; i += threads) {
+                unsigned end = (i + 1) * stride - 1;
+                sums[end] = __dadd_rn(sums[end], sums[end - stride / 2]);
+            }
+            __syncthreads();
+        }
+        if (threadIdx.x < 32) {
+            unsigned lane = threadIdx.x;
+            double total = sums[(lane + 1) * (tile_size / 32) - 1];
+            for (unsigned offset = 1; offset < 32; offset *= 2) {
+                double left = __shfl_up_sync(0xffffffff, total, offset);
+                if ((lane & (2 * offset - 1)) == 2 * offset - 1)
+                    total = __dadd_rn(total, left);
+            }
+            if (lane == 31) mass[t] = total;
+        }
         __syncthreads();
     }
 }

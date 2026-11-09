@@ -31,6 +31,55 @@ uint64_t reference(const std::vector<State>& a, uint64_t mask, uint64_t value, d
     }
     throw std::runtime_error("reference failed");
 }
+// Frozen original mass kernel: compare the full scan's last value bit for bit.
+__global__ void original_masses(const State* state, uint64_t count, uint64_t mask,
+                                uint64_t value, bool active, double* mass,
+                                td::rank_summary* summary) {
+    __shared__ double sums[td::tile_size];
+    for (uint64_t t = blockIdx.x; t < td::tiles_for(count); t += gridDim.x) {
+        for (unsigned j = threadIdx.x; j < td::tile_size; j += td::threads) {
+            double w = td::weight(state, t * td::tile_size + j, count, mask, value, active);
+            if (!isfinite(w) || w < 0) {
+                atomicOr(&summary->status, unsigned(td::invalid_weight)); w = 0;
+            }
+            sums[j] = w;
+        }
+        __syncthreads();
+        td::scan<td::tile_size>(sums);
+        if (threadIdx.x == 0) mass[t] = sums[td::tile_size-1];
+        __syncthreads();
+    }
+}
+void compare_masses(const State* state, uint64_t count, uint64_t mask,
+                    uint64_t value, bool active, cudaStream_t stream) {
+    if (!count) return;
+    size_t tiles = td::tiles_for(count);
+    double *old_mass, *new_mass;
+    td::rank_summary *old_status, *new_status;
+    td::check(cudaMallocAsync(&old_mass, tiles*sizeof(double), stream));
+    td::check(cudaMallocAsync(&new_mass, tiles*sizeof(double), stream));
+    td::check(cudaMallocAsync(&old_status, sizeof(*old_status), stream));
+    td::check(cudaMallocAsync(&new_status, sizeof(*new_status), stream));
+    td::check(cudaMemsetAsync(old_status, 0, sizeof(*old_status), stream));
+    td::check(cudaMemsetAsync(new_status, 0, sizeof(*new_status), stream));
+    // One block also exercises shared-memory reuse across consecutive tiles.
+    original_masses<<<1, td::threads, 0, stream>>>(state,count,mask,value,active,old_mass,old_status);
+    td::masses<<<1, td::threads, 0, stream>>>(state,count,mask,value,active,new_mass,new_status);
+    td::check(cudaGetLastError());
+    std::vector<double> before(tiles), after(tiles);
+    td::rank_summary a{}, b{};
+    td::check(cudaMemcpyAsync(before.data(), old_mass, tiles*sizeof(double), cudaMemcpyDeviceToHost, stream));
+    td::check(cudaMemcpyAsync(after.data(), new_mass, tiles*sizeof(double), cudaMemcpyDeviceToHost, stream));
+    td::check(cudaMemcpyAsync(&a, old_status, sizeof(a), cudaMemcpyDeviceToHost, stream));
+    td::check(cudaMemcpyAsync(&b, new_status, sizeof(b), cudaMemcpyDeviceToHost, stream));
+    td::check(cudaStreamSynchronize(stream));
+    require(std::memcmp(before.data(), after.data(), tiles*sizeof(double)) == 0, "mass rounding changed");
+    require(a.status == b.status, "mass status changed");
+    td::check(cudaFreeAsync(old_mass, stream));
+    td::check(cudaFreeAsync(new_mass, stream));
+    td::check(cudaFreeAsync(old_status, stream));
+    td::check(cudaFreeAsync(new_status, stream));
+}
 int main() {
     try {
         require(td::tiles_for(UINT64_MAX) == UINT64_MAX/4096 + 1, "64-bit tile count");
@@ -54,6 +103,7 @@ int main() {
                     td::check(cudaMallocAsync(&device, a.size()*sizeof(State), stream));
                     td::check(cudaMemcpyAsync(device, a.data(), a.size()*sizeof(State), cudaMemcpyHostToDevice, stream));
                 }
+                compare_masses(device, a.size(), mask, value, active, stream);
                 const auto* summary_device = ws.build(device, a.size(), mask, value, active);
                 td::rank_summary summary{};
                 td::check(cudaMemcpyAsync(&summary, summary_device, sizeof(summary), cudaMemcpyDeviceToHost, stream));
@@ -123,6 +173,16 @@ int main() {
             run(rank_overflow,0,0,true,td::invalid_total,{0,1});
             std::vector<State> rounded(8209, State(.1,.2));
             run(rounded,0,0,true,0,{0,.123,.789,1});
+            std::vector<State> nonuniform(8209);
+            for (size_t i = 0; i < nonuniform.size(); ++i)
+                nonuniform[i] = State(double(1 + i % 31) / 37, double(i % 7) / 19);
+            run(nonuniform,0,0,true,0,{0,.123,.789,1});
+            run(nonuniform,7,3,true,0,{0,.123,.789,1});
+            // Small contributions around an FP64 rounding boundary at every level.
+            std::vector<State> difficult(8209);
+            for (size_t i = 0; i < difficult.size(); ++i)
+                difficult[i] = State(i % 127 == 0 ? 1. : std::ldexp(1., -27), 0);
+            run(difficult,0,0,true,0,{0,.123,.789});
             run({},0,0,true,td::zero_mass,{0,1});
             run(std::vector<State>(17,State(0,0)),0,0,true,td::zero_mass,{0,1});
             for (double bad : std::vector<double>{NAN, INFINITY, 1e308}) {
