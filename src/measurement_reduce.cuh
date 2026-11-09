@@ -147,12 +147,13 @@ __device__ inline double block_sum(double value, double* scratch)
     return total; // Only thread zero consumes this result.
 }
 
-template<int N>
+// Compact=false retains the full-bin reference path for exact regression checks.
+template<int N, bool Compact = false>
 __global__ void first_stage(const state_type* state, packed_descriptor<N> d, double* partials)
 {
     extern __shared__ double sums[];
     __shared__ double scratch[block_size / 32];
-    constexpr uint64_t bins = UINT64_C(1) << N;
+    const uint64_t bins = UINT64_C(1) << (Compact ? d.local_targets : N);
     const uint64_t t = threadIdx.x;
     const uint64_t stride = uint64_t(gridDim.x) * block_size;
     for (uint64_t bin = 0; bin < bins; ++bin)
@@ -162,31 +163,63 @@ __global__ void first_stage(const state_type* state, packed_descriptor<N> d, dou
     {
         const uint64_t i = d.physical_index(packed);
         const state_type amplitude = state[i];
-        uint64_t outcome = d.fixed_outcome;
+        uint64_t outcome = Compact ? 0 : d.fixed_outcome;
         for (int j = 0; j < d.local_targets; ++j)
-            outcome |= ((i >> d.target_physical[j]) & UINT64_C(1)) << d.outcome_bits[j];
+            outcome |= ((i >> d.target_physical[j]) & UINT64_C(1)) << (Compact ? j : d.outcome_bits[j]);
         double re = amplitude.real(), im = amplitude.imag();
         sums[outcome * block_size + t] += re * re + im * im;
         if (d.active_count - packed <= stride) break;
         packed += stride;
     }
+    // With one block, write the full external layout directly. Only thread
+    // zero writes output, so zero initialization cannot race with bin stores.
+    if constexpr (Compact)
+        if (gridDim.x == 1 && t == 0)
+            for (uint64_t bin = 0; bin < (UINT64_C(1) << N); ++bin)
+                partials[bin] = 0.0;
     for (uint64_t bin = 0; bin < bins; ++bin)
     {
+        uint64_t output_bin = bin;
+        if constexpr (Compact)
+            if (gridDim.x == 1)
+            {
+                output_bin = d.fixed_outcome;
+                for (int j = 0; j < d.local_targets; ++j)
+                    output_bin |= ((bin >> j) & 1) << d.outcome_bits[j];
+            }
         double total = block_sum(sums[bin * block_size + t], scratch);
-        if (t == 0) partials[bin * uint64_t(gridDim.x) + blockIdx.x] = total;
+        if (t == 0) partials[output_bin * uint64_t(gridDim.x) + blockIdx.x] = total;
     }
 }
 
-template<int N>
-__global__ void second_stage(const double* partials, double* output, uint64_t partial_blocks)
+template<int N, bool Compact = false>
+__global__ void second_stage(const double* partials, double* output, uint64_t partial_blocks,
+                             packed_descriptor<N> d = {})
 {
     __shared__ double scratch[block_size / 32];
     const uint64_t blocks = partial_blocks; // First-stage bin-major stride.
     for (uint64_t bin = blockIdx.x; bin < (UINT64_C(1) << N); bin += gridDim.x)
     {
+        uint64_t local_bin = bin;
+        if constexpr (Compact)
+        {
+            uint64_t variable_mask = 0;
+            local_bin = 0;
+            for (int j = 0; j < d.local_targets; ++j)
+            {
+                variable_mask |= UINT64_C(1) << d.outcome_bits[j];
+                local_bin |= ((bin >> d.outcome_bits[j]) & 1) << j;
+            }
+            // Uniform across the block: no thread skips a shared-memory barrier.
+            if ((bin & ~variable_mask) != d.fixed_outcome)
+            {
+                if (threadIdx.x == 0) output[bin] = 0.0;
+                continue;
+            }
+        }
         double value = 0;
         for (uint64_t block = threadIdx.x; block < blocks; block += block_size)
-            value += partials[bin * blocks + block];
+            value += partials[local_bin * blocks + block];
         double total = block_sum(value, scratch);
         if (threadIdx.x == 0) output[bin] = total;
     }
@@ -309,8 +342,8 @@ launch_config resources(int device)
         block_size > static_cast<unsigned>(prop.maxThreadsPerBlock) ||
         block_size > static_cast<unsigned>(prop.maxThreadsDim[0]))
         throw std::runtime_error("measurement reducer: unsupported grid/block/warp limits");
-    const void* first = reinterpret_cast<const void*>(first_stage<N>);
-    const void* second = reinterpret_cast<const void*>(second_stage<N>);
+    const void* first = reinterpret_cast<const void*>(first_stage<N, true>);
+    const void* second = reinterpret_cast<const void*>(second_stage<N, true>);
     cudaFuncAttributes fa{}, sa{};
     ATLC_CHECK_CUDA(cudaFuncGetAttributes, &fa, first);
     ATLC_CHECK_CUDA(cudaFuncGetAttributes, &sa, second);
@@ -478,14 +511,16 @@ public:
         double* output = data_ + partial_elements;
         // Capacity/output offset stay at the maximum; only live partials are packed.
         const unsigned blocks = measurement_blocks(packed.active_count, config.blocks);
-        // For one block, partials[bin * gridDim.x + blockIdx.x] is
-        // already output[bin]. Keep the registered output offset unchanged.
-        first_stage<N><<<blocks, block_size, config.dynamic_shared, stream>>>(
+        // Only fresh local outcomes need accumulators. Keep traversal, launch
+        // geometry and reduction trees unchanged, including the full-local case.
+        const size_t shared = allocation_bytes(
+            checked_product(block_size, UINT64_C(1) << packed.local_targets), sizeof(double));
+        first_stage<N, true><<<blocks, block_size, shared, stream>>>(
             state, packed, blocks == 1 ? output : data_);
         ATLC_CHECK_CUDA(cudaGetLastError);
         if (blocks != 1)
         {
-            second_stage<N><<<(1u << N), block_size, 0, stream>>>(data_, output, blocks);
+            second_stage<N, true><<<(1u << N), block_size, 0, stream>>>(data_, output, blocks, packed);
             ATLC_CHECK_CUDA(cudaGetLastError);
         }
         return output;

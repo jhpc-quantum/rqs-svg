@@ -213,7 +213,7 @@ static void benchmark(qcs_simulator* sim, int warmups, int repetitions) {
         g = 8 * prop.multiProcessorCount; s = 256; dynamic = size_t(1 << n) * s * sizeof(double);
         cudaFuncAttributes attr{};
         // All widths share the same compiled static scratch shape; query N=4.
-        ATLC_CHECK_CUDA(cudaFuncGetAttributes, &attr, reinterpret_cast<const void*>(qcs::measurement_detail::first_stage<4>));
+        ATLC_CHECK_CUDA(cudaFuncGetAttributes, &attr, reinterpret_cast<const void*>(qcs::measurement_detail::first_stage<4, true>));
         stat = attr.sharedSizeBytes;
 #else
         workspace = c.cub_temp_buffer_device_size + c.measure_norm_device_size;

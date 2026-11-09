@@ -98,6 +98,27 @@ std::array<double, (1 << N)> compare(md::workspace& workspace, device_state& inp
                                      ", N=" + std::to_string(N) + ", bin=" + std::to_string(bin));
         if (expected[bin] == 0) require(gpu[bin] == 0, "zero bin not overwritten exactly");
     }
+    // Compare every fixture to the original full-bin accumulation with identical
+    // geometry. This also covers multi-stride reductions and cached controls.
+    auto config = workspace.reserve<N>(input.stream);
+    auto packed = md::pack(d, state.size());
+    unsigned blocks = md::measurement_blocks(packed.active_count, config.blocks);
+    ATLC_CHECK_CUDA(cudaMemsetAsync, workspace.data(), 0xff,
+                   workspace.capacity() * sizeof(double), input.stream);
+    md::first_stage<N><<<blocks, md::block_size, config.dynamic_shared, input.stream>>>(
+        input.data, packed, blocks == 1 ? result : workspace.data());
+    ATLC_CHECK_CUDA(cudaGetLastError);
+    if (blocks != 1)
+    {
+        md::second_stage<N><<<(1u << N), md::block_size, 0, input.stream>>>(
+            workspace.data(), result, blocks);
+        ATLC_CHECK_CUDA(cudaGetLastError);
+    }
+    std::array<double, (1 << N)> baseline{};
+    ATLC_CHECK_CUDA(cudaMemcpyAsync, baseline.data(), result, sizeof(baseline),
+                   cudaMemcpyDeviceToHost, input.stream);
+    ATLC_CHECK_CUDA(cudaStreamSynchronize, input.stream);
+    require(gpu == baseline, "compact/full-bin accumulation differs");
     // Reducer contract includes read-only state, even for zero/unnormalized input.
     std::vector<State> after(state.size());
     ATLC_CHECK_CUDA(cudaMemcpyAsync, after.data(), input.data, state.size() * sizeof(State),

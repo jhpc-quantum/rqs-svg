@@ -344,3 +344,45 @@ operations. Source inspection and final diff review were needed to implement
 and commit the requested changes; they are not execution validation. Use the
 matrix above on a configured CUDA/MPI installation before claiming runtime
 agreement or performance.
+
+## Local-bin compression
+
+The grouped reducer accumulates `2^L` bins, where `L` counts fresh local
+targets, rather than `2^N` bins for the requested group. Compact bit `j`
+corresponds to descriptor target `j`; expansion places it at
+`local_outcome_bits[j]` and adds `fixed_outcome`. Cached local targets remain
+controls; cached and global outcome bits remain fixed within each rank.
+
+For multiple blocks, the existing second kernel expands compact partials into
+all `2^N` output bins, explicitly zeroing impossible bins without reading
+partials. For one block, the first kernel writes the expanded layout directly.
+No launches, transfers, collective changes, or dispatch tuning are added.
+The registered workspace capacity and output offset remain unchanged. Dynamic
+shared memory falls from `256 * 2^N * sizeof(double)` to
+`256 * 2^L * sizeof(double)`; first-stage reduction work scales with `2^L`.
+
+Traversal, per-thread addition order, block geometry, and shuffle reduction
+trees are preserved for each possible bin. The shared scratch retains both
+barriers between reductions. Impossible-bin branches in the second kernel are
+uniform within each block; single-block output initialization and stores are
+both performed by thread zero.
+
+`make test-measurement-reduce` compares every oracle fixture exactly against
+the retained full-bin kernel, for N=1..4 and L=0..N, reversed/noncontiguous
+physical targets and outcome positions, controls, sparse/zero inputs, reused
+poisoned storage, single blocks and multi-stride grids. Run this test under
+Compute Sanitizer racecheck and synccheck on CUDA hardware as well.
+
+For complete API latency, build baseline and optimized revisions in separate
+directories with identical compiler flags, and run the existing
+`benchmark-measurement` harness with identical MPI rank counts, qubit counts,
+warmups and repetitions. Include local-only, global-only and mixed groups and
+cached/fresh sequences from the distributed regression suite; compare full API
+host completion latency, not only reducer events. The reducer's optional
+`--benchmark` mode compares against the older two-launch full-bin path and is
+not a complete API or isolated compression benchmark.
+
+In the implementation environment, host launch/backend/workspace tests passed.
+CUDA compilation, distributed GPU validation, sanitizer runs and latency
+measurements were unavailable because CUDA tools and GPU hardware were absent.
+No measured speedup is claimed.
