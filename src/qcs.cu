@@ -1097,7 +1097,7 @@ namespace qcs
             double* device = nullptr;
             size_t capacity = 0;
             std::vector<double> weights;
-            std::vector<long double> exchange, masses;
+            std::vector<double> exchange, masses;
 
             workspace() = default;
             workspace(const workspace&) = delete;
@@ -1258,8 +1258,8 @@ namespace qcs
         unsigned char* measurement_collective_send = nullptr;
         unsigned char* measurement_collective_receive = nullptr;
         static constexpr size_t measurement_collective_bytes =
-            sizeof(long double) * 2 > sizeof(tiled_cdf_detail::rank_summary)
-            ? sizeof(long double) * 2 : sizeof(tiled_cdf_detail::rank_summary);
+            sizeof(double) * 2 > sizeof(tiled_cdf_detail::rank_summary)
+            ? sizeof(double) * 2 : sizeof(tiled_cdf_detail::rank_summary);
         std::unique_ptr<tiled_cdf_detail::workspace> tiled_workspace;
 
         int log_num_procs;
@@ -2776,8 +2776,7 @@ namespace qcs
                 double uniform = ranks[0].uniform;
                 if (!std::isfinite(uniform) || uniform < 0 || uniform > 1)
                     throw std::runtime_error("invalid measurement uniform");
-                long double threshold = std::min(static_cast<long double>(uniform) * total,
-                                                std::nextafter(total, 0.0L));
+                double threshold = std::min(uniform * total, std::nextafter(total, 0.0));
                 int selected = -1;
                 for (int r = 0; r < num_procs; ++r) {
                     if (ranks[r].mass <= 0) continue;
@@ -2848,7 +2847,7 @@ namespace qcs
                 auto& weights = rank_sampling_workspace.weights;
                 auto& masses = rank_sampling_workspace.masses;
                 auto& exchange = rank_sampling_workspace.exchange;
-                long double mass = -1;
+                double mass = -1;
                 double uniform_local = 0;
                 try {
                     measured_1_qubit_num_logical_list.reserve(num_qubits);
@@ -2880,12 +2879,12 @@ namespace qcs
                 } catch (...) { mass = -1; }
                 // Include the authoritative rank-zero draw in the mass exchange:
                 // no separate broadcast or rank-dependent dispatch collective.
-                long double payload[2] = {mass, static_cast<long double>(uniform_local)};
+                double payload[2] = {mass, uniform_local};
                 QCS_MEASURE_STAGE("rank_sampled.rank_mass_collection");
                 measurement_allgather(payload, exchange.data(), sizeof(payload));
                 for (int rank = 0; rank < num_procs; ++rank) masses[rank] = exchange[2 * rank];
                 QCS_MEASURE_STAGE("rank_sampled.rank_selection");
-                long double total = 0;
+                double total = 0;
                 for (auto w : masses) {
                     if (!std::isfinite(w) || w < 0)
                         throw std::runtime_error("invalid measurement probability component");
@@ -2897,18 +2896,17 @@ namespace qcs
                 double uniform = static_cast<double>(exchange[1]);
                 if (!std::isfinite(uniform) || uniform < 0 || uniform >= 1)
                     throw std::runtime_error("invalid measurement uniform");
-                auto select = [](const auto& bins, size_t count, long double& threshold) {
+                auto select = [](const auto& bins, size_t count, double& threshold) {
                     size_t last = 0;
                     for (size_t i = 0; i < count; ++i) if (bins[i] > 0) {
                         last = i;
                         if (threshold < bins[i]) return i;
                         threshold -= bins[i];
                     }
-                    threshold = std::nextafter(static_cast<long double>(bins[last]), 0.0L);
+                    threshold = std::nextafter(bins[last], 0.0L);
                     return last;
                 };
-                long double threshold = std::min(static_cast<long double>(uniform) * total,
-                                                std::nextafter(total, 0.0L));
+                double threshold = std::min(uniform * total, std::nextafter(total, 0.0));
                 int selected = static_cast<int>(select(masses, masses.size(), threshold));
                 uint64_t index = UINT64_MAX;
                 const uint64_t* device_index = nullptr;

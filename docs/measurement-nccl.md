@@ -7,18 +7,16 @@ and CUDA stream. Cached requests require neither collective nor RNG advancement.
 sampling uses the new transport.
 
 Persistent send/receive slices come from the simulator scratch arena and are
-released with it. NCCL uses `ncclUint8` for compact records. Rank sampling keeps
-its host long-double chunk sums and rank CDF: byte transport preserves their
-precision, including totals beyond double range. This requires matching host
-ABIs across ranks (including long-double representation); heterogeneous ABIs
-are unsupported. GPU rank selection was considered but would require replacing
-that extended-precision arithmetic. No new sampling kernels are introduced.
+released with it. NCCL uses `ncclUint8` for compact records. Rank sampling uses host `double` chunk sums and rank CDF, transported as two
+doubles per rank. This avoids host ABI dependence and matches NCCL `ncclDouble`.
+Very large sums can lose precision or overflow sooner than with extended precision;
+nonfinite totals are rejected. No new sampling kernels are introduced.
 
 Tiled summaries flow directly from the GPU into all-gather. The gathered summaries
 are read back once for host rank selection. Both backends broadcast successful
 owner samples directly from device storage and read back the shared result once.
 Rank sampling retains its chunk-weight readback and adds one upload of two
-long doubles. Tiled sampling removes the local summary readback; both remove
+doubles. Tiled sampling removes the local summary readback; both remove
 the owner-only sample readback and synchronization. These are source-level
 transfer counts, not measured performance improvements. Small-message NCCL
 latency may outweigh saved synchronization.
