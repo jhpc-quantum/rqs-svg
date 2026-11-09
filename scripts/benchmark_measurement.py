@@ -3,6 +3,8 @@
 import argparse
 import csv
 import json
+import hashlib
+import platform
 import os
 from pathlib import Path
 import shlex
@@ -39,14 +41,35 @@ def run(command, **kwargs):
     (out/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     subprocess.run(command, cwd=root, check=True, **kwargs)
 
+# Probe availability without treating missing hardware tools as measurements.
+manifest['host'] = dict(platform=platform.platform(), machine=platform.machine(),
+                        processor=platform.processor())
+manifest['probes'] = {}
+for command in (['lscpu'], ['nvidia-smi', '-q'], ['nvidia-smi', 'topo', '-m'],
+                ['nvcc', '--version'], ['nsys', '--version'], ['ncu', '--version'],
+                shlex.split(a.mpiexec)[:1] + ['--version'], ['c++', '--version']):
+    try:
+        probe = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, timeout=30)
+        manifest['probes'][shlex.join(command)] = {'returncode': probe.returncode,
+                                                  'output': probe.stdout}
+    except (OSError, subprocess.TimeoutExpired) as error:
+        manifest['probes'][shlex.join(command)] = {'unavailable': str(error)}
+manifest['build_preview'] = subprocess.run(
+    ['make', '-Bn', str(a.binary)], cwd=root, text=True,
+    stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+(out/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
 if not a.no_build:
     with (out/'build.log').open('w') as log:
         run(['make', str(a.binary)], stdout=log, stderr=subprocess.STDOUT)
+binary = (root/a.binary).resolve()
+manifest['binary_sha256'] = hashlib.sha256(binary.read_bytes()).hexdigest()
 for backend in a.backends:
+    manifest.setdefault('backend_environments', {})[backend] = {'QCS_MEASUREMENT_BACKEND': backend}
     with (out/(backend+'.csv')).open('w') as data, (out/(backend+'.log')).open('w') as log:
         run(shlex.split(a.mpiexec)+['-n',str(a.ranks),str((root/a.binary).resolve()),str(a.qubits),str(a.warmups),str(a.repetitions)],
             env=os.environ | {'QCS_MEASUREMENT_BACKEND':backend}, stdout=data, stderr=log)
-keys = ['qubits','gpus','nodes','state','targets','layout','deferred','mapping','warmups','repetitions']
+keys = ['qubits','gpus','nodes','state','targets','layout','deferred','mapping','api','warmups','repetitions']
 tables = {}
 for backend in a.backends:
     with (out/(backend+'.csv')).open() as source:
