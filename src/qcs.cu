@@ -3182,22 +3182,20 @@ namespace qcs
         bool use_rank_sampling(const std::vector<int>& qubits) const
         {
             if (!auto_measurement) return rank_sampled_measurement;
-            measurement_detail::backend_workload workload{};
-            workload.ranks = num_procs;
-            workload.local_states = num_states_local;
+            uint64_t requested_physical = 0, measured_physical = 0;
             for (int q = 0; q < num_qubits; ++q) {
-                if (!(measured_mask_logical & (UINT64_C(1) << q))) continue;
-                if (perm_l2p[q] < num_qubits_local) ++workload.measured_local;
-                else ++workload.measured_global;
+                if (measured_mask_logical & (UINT64_C(1) << q))
+                    measured_physical |= UINT64_C(1) << perm_l2p[q];
             }
-            for (int q : qubits) {
-                if (measured_mask_logical & (UINT64_C(1) << q)) continue;
-                if (perm_l2p[q] < num_qubits_local) ++workload.fresh_local;
-                else ++workload.fresh_global;
-            }
+            for (int q : qubits)
+                requested_physical |= UINT64_C(1) << perm_l2p[q];
+            const auto workload = measurement_detail::workload_from_masks(
+                requested_physical, measured_physical, num_qubits_local,
+                num_procs, num_states_local);
             // Only replicated metadata enters dispatch; never rank-local mass,
             // control compatibility, RNG state, or observed runtime timings.
-            return measurement_detail::prefer_rank_sampling(workload);
+            return measurement_detail::select_auto_backend(workload) ==
+                   measurement_detail::automatic_backend::rank_sampled;
         }
 
         void measure_many(const std::vector<int>& qubits, std::vector<bit_t>& results)

@@ -13,6 +13,19 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     } else if (c.use_rank_sampling(dispatch_targets)) {
         throw std::runtime_error("auto single-target dispatch regression");
     }
+    if (c.auto_measurement) {
+        // Dispatch must be independent of rank-local RNG and recorded outcomes.
+        const auto seed = c.rng_seed;
+        const auto value = c.measured_value_logical;
+        const bool selected = c.use_rank_sampling(dispatch_targets);
+        c.rng_seed += c.proc_num + 1;
+        c.measured_value_logical ^= c.measured_mask_logical;
+        const bool repeated = c.use_rank_sampling(dispatch_targets);
+        c.rng_seed = seed;
+        c.measured_value_logical = value;
+        if (selected != repeated)
+            throw std::runtime_error("auto depends on rank-local sampling data");
+    }
     if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement && !c.tiled_race_measurement && !c.tiled_race_nccl_measurement) return;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("rank sampling metadata regression"); };
     c.initialize_selected_state();
