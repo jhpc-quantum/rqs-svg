@@ -478,10 +478,16 @@ public:
         double* output = data_ + partial_elements;
         // Capacity/output offset stay at the maximum; only live partials are packed.
         const unsigned blocks = measurement_blocks(packed.active_count, config.blocks);
-        first_stage<N><<<blocks, block_size, config.dynamic_shared, stream>>>(state, packed, data_);
+        // For one block, partials[bin * gridDim.x + blockIdx.x] is
+        // already output[bin]. Keep the registered output offset unchanged.
+        first_stage<N><<<blocks, block_size, config.dynamic_shared, stream>>>(
+            state, packed, blocks == 1 ? output : data_);
         ATLC_CHECK_CUDA(cudaGetLastError);
-        second_stage<N><<<(1u << N), block_size, 0, stream>>>(data_, output, blocks);
-        ATLC_CHECK_CUDA(cudaGetLastError);
+        if (blocks != 1)
+        {
+            second_stage<N><<<(1u << N), block_size, 0, stream>>>(data_, output, blocks);
+            ATLC_CHECK_CUDA(cudaGetLastError);
+        }
         return output;
     }
 

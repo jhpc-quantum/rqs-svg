@@ -51,7 +51,8 @@ impossible bins and excluded ranks contribute exact zeros.
 The launch policy uses S=256 threads and
 `G=min(8*SM_count, ceil(active_count/256))` first-stage blocks. Large workloads
 retain the previous grid cap; each launched block has at least one active item.
-Stage one writes `partials[bin*G + block]`. Stage two launches exactly `2^N`
+Stage one writes `partials[bin*G + block]`. When G=1, stage one writes final contiguous bins directly to the usual output
+offset and stage two is skipped. For G>1, stage two launches exactly `2^N`
 blocks (one per bin), receiving G explicitly as its partial count and stride.
 Workspace capacity and the output offset retain the maximum `8*SM_count`
 layout, including for `enqueue_zero`; unused partial storage is never read.
@@ -67,7 +68,7 @@ The measurement slice is sized once for the largest requirement across N=1..4,
 before the swap slice is carved out;
 measurements do not grow or allocate storage. All used elements are overwritten.
 The standalone reducer test also supports an owning workspace that grows on
-demand. `enqueue` launches both stages
+demand. `enqueue` launches one or both stages
 without synchronization and returns device bins valid until the next call or
 close. NCCL AllReduce sums the output bins in place on the same stream, followed
 by the device sampler and an eight-byte outcome/status copy. Only that final
