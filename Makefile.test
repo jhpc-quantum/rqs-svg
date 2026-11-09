@@ -239,3 +239,11 @@ test-measurement-tiled-cdf: $(TILED_CDF_TEST)
 	./$(TILED_CDF_TEST)
 
 TEST_BINARIES += $(TILED_CDF_TEST)
+
+# Every direct and copied-source consumer must rebuild when tiled primitives change.
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/measurement_tiled_cdf.cuh
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_tiled_cdf.cuh
+
+.PHONY: test-measurement-tiled-integration
+test-measurement-tiled-integration: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+	QCS_MEASUREMENT_BACKEND=tiled_cdf $(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test

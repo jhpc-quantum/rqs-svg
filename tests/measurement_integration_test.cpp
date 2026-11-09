@@ -24,7 +24,7 @@ int main()
     qcs_simulator* sim = qcs_simulator_create_cxx();
     try
     {
-        constexpr int n = 10;
+        constexpr int n = 16; // At least two 4096-amplitude tiles per rank, even at eight ranks.
         const int rank = qcs_simulator_get_proc_num_cxx(sim);
         const int ranks = qcs_simulator_get_num_procs_cxx(sim);
         require(ranks > 0 && ranks <= 8 && (ranks & (ranks - 1)) == 0,
@@ -140,7 +140,7 @@ int main()
             std::fclose(file);
             std::remove(filename.data());
             require(count == state.size(), "saved state size");
-            const unsigned selected = (branch ? (1u << n) - 1 : 0) ^ (1u << root);
+            const unsigned selected = (branch ? (1u << 10) - 1 : 0) ^ (1u << root);
             const double amplitude = branch ? std::sin(theta / 2) : std::cos(theta / 2);
             for (unsigned i = 0; i < state.size(); ++i)
                 require(std::abs(state[i] - (i == selected ? amplitude : 0.0)) < 1e-11,

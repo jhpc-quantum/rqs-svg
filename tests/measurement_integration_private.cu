@@ -13,9 +13,53 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     } else if (c.use_rank_sampling(dispatch_targets)) {
         throw std::runtime_error("auto single-target dispatch regression");
     }
-    if (!c.rank_sampled_measurement) return;
+    if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement) return;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("rank sampling metadata regression"); };
     c.initialize_selected_state();
+    if (c.tiled_cdf_measurement) {
+        check(!c.use_rank_sampling(dispatch_targets));
+        c.measurement_counter = (UINT64_C(1) << 32) + 17;
+        // Full-register correlated, nonuniform distribution spanning tiles and ranks.
+        std::vector<int> all;
+        for (int q = c.num_qubits - 1; q >= 0; --q) all.push_back(q);
+        std::vector<bit_t> bits(all.size());
+        int counts[4]{};
+        const uint64_t basis[] = {0, 4097, c.num_states - 4098, c.num_states - 1};
+        auto seed = c.rng_seed;
+        c.rng_seed += c.proc_num; // Rank zero remains authoritative.
+        for (int shot = 0; shot < 512; ++shot) {
+            c.initialize_selected_state();
+            std::vector<qcs::complex_t> state(c.num_states_local, qcs::complex_t(0, 0));
+            for (int k = 0; k < 4; ++k)
+                if (basis[k] / c.num_states_local == uint64_t(c.proc_num))
+                    state[basis[k] % c.num_states_local] = qcs::complex_t(0, std::sqrt((k+1)/10.0));
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, c.state_data_device, state.data(),
+                state.size()*sizeof(state[0]), cudaMemcpyHostToDevice, c.stream);
+            auto before = c.measurement_counter;
+            c.measure_many(all, bits);
+            check(c.measurement_counter == before + 1);
+            uint64_t physical = 0;
+            for (size_t j = 0; j < all.size(); ++j)
+                physical |= uint64_t(bits[j]) << c.perm_l2p[all[j]];
+            int k = 0;
+            while (k < 4 && basis[k] != physical) ++k;
+            check(k < 4);
+            ++counts[k];
+            uint64_t low, high;
+            MPI_Allreduce(&physical, &low, 1, MPI_UINT64_T, MPI_MIN, MPI_COMM_WORLD);
+            MPI_Allreduce(&physical, &high, 1, MPI_UINT64_T, MPI_MAX, MPI_COMM_WORLD);
+            check(low == high);
+            auto cached = bits;
+            c.measure_many(all, bits);
+            check(bits == cached && c.measurement_counter == before + 1);
+        }
+        for (int k = 0; k < 4; ++k) {
+            double p = (k+1)/10.0;
+            check(std::abs(counts[k]-512*p) < 7*std::sqrt(512*p*(1-p))+2);
+        }
+        c.rng_seed = seed;
+        c.initialize_selected_state();
+    }
     if (c.num_procs > 1) {
         // Direct physical preparation keeps the superposed bit global: gates
         // would otherwise be free to localize it before the measurement.
@@ -57,13 +101,21 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     // Invalid effective norms must fail collectively without consuming a draw.
     for (double amplitude : {0.0, std::numeric_limits<double>::quiet_NaN(),
                              std::numeric_limits<double>::infinity()}) {
-        std::vector<qcs::complex_t> state(c.num_states_local, qcs::complex_t(amplitude, 0));
+        std::vector<qcs::complex_t> state(c.num_states_local, qcs::complex_t(0, 0));
+        // Nonfinite norms originate on just one rank; other ranks remain valid.
+        if (amplitude != 0.0 && c.proc_num != c.num_procs - 1)
+            state[0] = qcs::complex_t(1, 0);
+        else
+            state[0] = qcs::complex_t(amplitude, 0);
         ATLC_CHECK_CUDA(cudaMemcpyAsync, c.state_data_device, state.data(),
                         state.size() * sizeof(state[0]), cudaMemcpyHostToDevice, c.stream);
         auto before = c.measurement_counter;
         rejected = false;
+        std::fill(result.begin(), result.end(), bit_t(7));
         try { c.measure_many(targets, result); } catch (const std::runtime_error&) { rejected = true; }
         check(rejected && c.measurement_counter == before && c.measured_mask_logical == 0);
+        check(c.pending_projection_mask_logical == 0);
+        check(std::all_of(result.begin(), result.end(), [](bit_t b) { return b == 7; }));
     }
     c.initialize_selected_state();
 }

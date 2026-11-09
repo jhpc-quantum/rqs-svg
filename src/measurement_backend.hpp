@@ -1,8 +1,19 @@
 #pragma once
 #include <cstdint>
+#include <cstring>
 
 namespace qcs::measurement_detail
 {
+// Stable internal selection codes; auto continues to choose only legacy paths.
+inline int backend_mode(const char* name)
+{
+    if (!name || std::strcmp(name, "grouped") == 0) return 0;
+    if (std::strcmp(name, "rank_sampled") == 0) return 1;
+    if (std::strcmp(name, "auto") == 0) return 2;
+    if (std::strcmp(name, "tiled_cdf") == 0) return 3;
+    return -1;
+}
+
 struct backend_workload
 {
     int fresh_local = 0, fresh_global = 0;

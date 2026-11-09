@@ -12,7 +12,7 @@ constexpr unsigned threads = 256;
 constexpr unsigned tile_size = 4096;
 enum status : unsigned { success = 0, invalid_weight = 1, invalid_total = 2,
     zero_mass = 4, invalid_uniform = 8, invalid_distribution = 16 };
-struct rank_summary { double mass; unsigned status; };
+struct rank_summary { double mass; unsigned status; double uniform; };
 struct sample_result { uint64_t index; unsigned status; };
 inline void check(cudaError_t e) {
     if (e != cudaSuccess) throw std::runtime_error(cudaGetErrorString(e));

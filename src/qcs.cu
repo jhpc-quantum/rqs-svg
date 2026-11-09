@@ -1,5 +1,6 @@
 #include "measurement_profile.hpp"
 #include "measurement_backend.hpp"
+#include "measurement_tiled_cdf.cuh"
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
@@ -1122,6 +1123,14 @@ namespace qcs
             ~workspace() { if (device) cudaFree(device); }
         };
 
+        __global__ void tiled_uniform(tiled_cdf_detail::rank_summary* summary,
+                                      uint64_t seed, uint64_t counter)
+        {
+            auto bits = measurement_detail::measurement_random(seed, counter);
+            summary->uniform = double((uint64_t(bits.x) << 21) |
+                                      (uint64_t(bits.y) >> 11)) * 0x1.0p-53;
+        }
+
         // One block per contiguous chunk. Storage scales with state size, never
         // with the number of requested outcomes. No state is projected here.
         __global__ void chunk_weights(const complex_t* state, uint64_t count,
@@ -1240,8 +1249,11 @@ namespace qcs
         uint64_t measurement_counter = 0;
         bool measurement_counter_exhausted = false;
         bool rank_sampled_measurement = false;
+        bool tiled_cdf_measurement = false;
         bool auto_measurement = false;
         rank_sampling_detail::workspace rank_sampling_workspace;
+        std::vector<tiled_cdf_detail::rank_summary> tiled_rank_summaries;
+        std::unique_ptr<tiled_cdf_detail::workspace> tiled_workspace;
 
         int log_num_procs;
         int max_num_qubits_local_device;
@@ -1349,9 +1361,7 @@ namespace qcs
             MPI_Comm_rank(MPI_COMM_WORLD, &proc_num);
 
             const char* backend = std::getenv("QCS_MEASUREMENT_BACKEND");
-            int mode = !backend || std::strcmp(backend, "grouped") == 0 ? 0 :
-                       std::strcmp(backend, "rank_sampled") == 0 ? 1 :
-                       std::strcmp(backend, "auto") == 0 ? 2 : -1;
+            int mode = measurement_detail::backend_mode(backend);
             int low_mode, high_mode;
             ATLC_CHECK_MPI(MPI_Allreduce, &mode, &low_mode, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             ATLC_CHECK_MPI(MPI_Allreduce, &mode, &high_mode, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
@@ -1359,6 +1369,14 @@ namespace qcs
                 throw std::runtime_error("invalid or inconsistent QCS_MEASUREMENT_BACKEND across ranks");
             rank_sampled_measurement = mode == 1;
             auto_measurement = mode == 2;
+            tiled_cdf_measurement = mode == 3;
+            if (tiled_cdf_measurement) {
+                int ready = 1, all_ready = 0;
+                try { tiled_rank_summaries.resize(num_procs); }
+                catch (...) { ready = 0; }
+                ATLC_CHECK_MPI(MPI_Allreduce, &ready, &all_ready, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+                if (!all_ready) throw std::runtime_error("tiled CDF rank storage allocation failed");
+            }
 
             // Check before creating the communicator, including mixed binaries.
             int local_mode = nccl_buffer_mode, min_mode = 0, max_mode = 0;
@@ -1748,6 +1766,7 @@ namespace qcs
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
             deregister_nccl_buffer(nccl_comm, scratch_registration);
             deregister_nccl_buffer(nccl_comm, state_registration);
+            tiled_workspace.reset();
             rank_sampling_workspace.close();
             pauli_workspace.reset();
             if (measurement_workspace)
@@ -2632,6 +2651,108 @@ namespace qcs
             return outcome;
         }
 
+        void measure_tiled_cdf(const std::vector<int>& qubits, std::vector<bit_t>& results)
+        {
+            QCS_MEASURE_RANGE("tiled_cdf.metadata_and_allocation");
+            uint64_t requested = 0;
+            for (int q : qubits) requested |= UINT64_C(1) << q;
+            uint64_t fresh = requested & ~measured_mask_logical;
+            uint64_t sampled = measured_value_logical;
+            if (fresh)
+            {
+                uint64_t mask = 0, value = 0;
+                bool active = true;
+                for (int q = 0; q < num_qubits; ++q)
+                    if (measured_mask_logical & (UINT64_C(1) << q)) {
+                        int p = perm_l2p[q];
+                        uint64_t b = (measured_value_logical >> q) & 1;
+                        if (p < num_qubits_local) {
+                            mask |= UINT64_C(1) << p;
+                            value |= b << p;
+                        } else if (((uint64_t(proc_num) >> (p - num_qubits_local)) & 1) != b)
+                            active = false;
+                    }
+                // Allocate all commit storage before entering the collective protocol.
+                // Any recoverable local build failure is carried by the summary.
+                tiled_cdf_detail::rank_summary summary{};
+                auto& ranks = tiled_rank_summaries;
+                try {
+                    measured_1_qubit_num_logical_list.reserve(num_qubits);
+                    measured_0_qubit_num_logical_list.reserve(num_qubits);
+                    if (measurement_counter_exhausted)
+                        throw std::runtime_error("measurement RNG counter exhausted");
+                    if (!tiled_workspace)
+                        tiled_workspace = std::make_unique<tiled_cdf_detail::workspace>(stream);
+                    auto* device_summary = tiled_workspace->build(state_data_device, num_states_local,
+                                                        mask, value, active);
+                    rank_sampling_detail::tiled_uniform<<<1, 1, 0, stream>>>(
+                        const_cast<tiled_cdf_detail::rank_summary*>(device_summary),
+                        rng_seed, measurement_counter);
+                    tiled_cdf_detail::check(cudaGetLastError());
+                    tiled_cdf_detail::check(cudaMemcpyAsync(&summary, device_summary,
+                        sizeof(summary), cudaMemcpyDeviceToHost, stream));
+                    tiled_cdf_detail::check(cudaStreamSynchronize(stream));
+                } catch (...) {
+                    summary.status = tiled_cdf_detail::invalid_distribution;
+                }
+                ATLC_CHECK_MPI(MPI_Allgather, &summary, int(sizeof(summary)), MPI_BYTE,
+                               ranks.data(), int(sizeof(summary)), MPI_BYTE, MPI_COMM_WORLD);
+                long double total = 0;
+                for (const auto& r : ranks) {
+                    if ((r.status & ~unsigned(tiled_cdf_detail::zero_mass)) ||
+                        !std::isfinite(r.mass) || r.mass < 0)
+                        throw std::runtime_error("invalid tiled CDF rank summary");
+                    total += r.mass;
+                }
+                if (!std::isfinite(total) || !(total > 0))
+                    throw std::runtime_error("invalid measurement norm");
+                double uniform = ranks[0].uniform;
+                if (!std::isfinite(uniform) || uniform < 0 || uniform > 1)
+                    throw std::runtime_error("invalid measurement uniform");
+                long double threshold = std::min(static_cast<long double>(uniform) * total,
+                                                std::nextafter(total, 0.0L));
+                int selected = -1;
+                for (int r = 0; r < num_procs; ++r) {
+                    if (ranks[r].mass <= 0) continue;
+                    selected = r;
+                    if (threshold < ranks[r].mass) break;
+                    threshold -= ranks[r].mass;
+                }
+                double fraction = std::min(double(threshold / ranks[selected].mass),
+                                           std::nextafter(1.0, 0.0));
+                tiled_cdf_detail::sample_result result{UINT64_MAX,
+                                                       tiled_cdf_detail::invalid_distribution};
+                if (proc_num == selected) {
+                    try {
+                        const auto* device_result = tiled_workspace->draw(fraction);
+                        tiled_cdf_detail::check(cudaMemcpyAsync(&result, device_result,
+                            sizeof(result), cudaMemcpyDeviceToHost, stream));
+                        tiled_cdf_detail::check(cudaStreamSynchronize(stream));
+                    } catch (...) {
+                        result = {UINT64_MAX, tiled_cdf_detail::invalid_distribution};
+                    }
+                }
+                ATLC_CHECK_MPI(MPI_Bcast, &result, int(sizeof(result)), MPI_BYTE,
+                               selected, MPI_COMM_WORLD);
+                if (result.status || result.index >= num_states_local)
+                    throw std::runtime_error("invalid tiled CDF owner sample");
+                uint64_t index = result.index;
+                uint64_t physical = index | (uint64_t(selected) << num_qubits_local);
+                for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {
+                    uint64_t b = (physical >> perm_l2p[q]) & 1;
+                    sampled = (sampled & ~(UINT64_C(1) << q)) | (b << q);
+                    (b ? measured_1_qubit_num_logical_list : measured_0_qubit_num_logical_list).push_back(q);
+                }
+                measured_mask_logical |= fresh;
+                measured_value_logical = sampled;
+                pending_projection_mask_logical |= fresh;
+                if (measurement_counter == UINT64_MAX) measurement_counter_exhausted = true;
+                else ++measurement_counter;
+            }
+            for (size_t i = 0; i < qubits.size(); ++i)
+                results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
+        }
+
         void measure_rank_sampled(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
             QCS_MEASURE_RANGE("rank_sampled.metadata_and_allocation");
@@ -2777,17 +2898,19 @@ namespace qcs
 
         void measure_many(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
-            if (use_rank_sampling(qubits)) measure_rank_sampled(qubits, results);
+            if (tiled_cdf_measurement) measure_tiled_cdf(qubits, results);
+            else if (use_rank_sampling(qubits)) measure_rank_sampled(qubits, results);
             else measure_qubit_groups(qubits, results);
         }
 
         int measure_qubit(int const qubit)
         {
             if (qubit < 0 || qubit >= num_qubits) throw std::runtime_error("qubit is out of range");
-            if (!use_rank_sampling({qubit}))
+            if (!tiled_cdf_measurement && !use_rank_sampling({qubit}))
                 return static_cast<int>(measure_qubits<1>({qubit}));
             std::vector<bit_t> result(1);
-            measure_rank_sampled({qubit}, result);
+            if (tiled_cdf_measurement) measure_tiled_cdf({qubit}, result);
+            else measure_rank_sampled({qubit}, result);
             return result[0];
         }
 

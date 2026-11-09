@@ -85,3 +85,5 @@ In the implementation environment `make test-measurement-tiled-cdf` stopped at
 compilation because `nvcc` was not installed (make exit 2, compiler launch error
 127). CUDA compilation, GPU correctness, repeatability, and performance remain
 unverified and must be checked on the target CUDA system.
+
+The distributed opt-in backend is described in [Tiled CDF measurement](tiled-cdf-measurement.md).

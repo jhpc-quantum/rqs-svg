@@ -6,6 +6,10 @@ int main()
 {
     using namespace qcs::measurement_detail;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("backend dispatch regression"); };
+    check(backend_mode(nullptr) == 0 && backend_mode("grouped") == 0);
+    check(backend_mode("rank_sampled") == 1 && backend_mode("auto") == 2);
+    check(backend_mode("tiled_cdf") == 3);
+    check(backend_mode("") == -1 && backend_mode("unknown") == -1);
     backend_workload w;
     w.local_states = UINT64_C(1) << 26;
     w.ranks = 32;
