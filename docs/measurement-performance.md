@@ -1,5 +1,7 @@
 # Distributed measurement performance
 
+Current source audit and host baseline: [measurement baseline](measurement-baseline.md).
+
 The paired benchmark covers `grouped`, `rank_sampled`, `tiled_cdf`, and `auto`.
 Production backend implementations and automatic dispatch policy are preserved.
 
@@ -103,9 +105,9 @@ pending. Let L be local amplitudes and T=ceil(L/4096):
 | Property | tiled_cdf | rank_sampled |
 | --- | --- | --- |
 | Device mass metadata | Two T-element double arrays | Chunk weights, double per chunk |
-| Per-rank D2H mass summary | sizeof(rank_summary), constant | 8*(T+1) bytes |
-| Owner D2H result | sizeof(sample_result), constant | uint64 index |
-| Fresh API collectives | One MPI Allgather + one MPI Bcast | One MPI Allgather + one MPI Bcast |
+| Per-rank D2H mass exchange | ranks*sizeof(rank_summary) | 8*(T+1) + 16*ranks bytes |
+| Result D2H on every rank | sizeof(sample_result), constant | uint64 index |
+| Fresh API collectives | One NCCL AllGather + one NCCL Broadcast | One NCCL AllGather + one NCCL Broadcast |
 | Fully cached API collectives | Zero | Zero |
 
 Tiled workspace requested bytes are `16*T + sizeof(rank_summary) +
@@ -113,7 +115,7 @@ sizeof(sample_result)` per rank (allocator overhead excluded). Host summary stor
 is O(ranks), with a constant-size contribution per rank. For 33 qubits on 32/64/128
 GPUs, tiled arrays occupy respectively 1 MiB/512 KiB/256 KiB per rank, compared
 with rank_sampled chunk-summary readback of about 512/256/128 KiB per fresh call.
-Tiled readback is one summary on each rank plus one result on the owner; use actual
+Tiled readback is the gathered summaries and one result on every rank; use actual
 ABI sizes and trace copy sizes for exact byte counts. Neither backend allocates
 an amplitude-sized probability/CDF array. Tiled arrays stay on device, and capacity
 is retained across calls. No tile array is copied to host in the production path.
