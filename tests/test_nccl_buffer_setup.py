@@ -17,6 +17,10 @@ class NcclBufferSetupTest(unittest.TestCase):
         source = (ROOT / 'src/qcs.cu').read_text()
         start = source.index('            MPI_Comm_size', source.index('void setup_after_mpi()'))
         end = source.index('            atlc::group_by_hostname', start)
+        # Backend setup has its own collectives; isolate buffer validation so
+        # stub call ordinals continue to describe only the block under test.
+        validation = source.index('            int local_mode = nccl_buffer_mode', start)
+        block = source[start:source.index('            const char* backend', start)] + source[validation:end]
         # Compile the actual production validation block, without CUDA dependencies.
         stub = r'''
 #include <cstdlib>
@@ -73,7 +77,7 @@ int main(int argc, char** argv) {
 }
 '''
         path = cls.directory / 'setup.cpp'
-        path.write_text(stub + source[start:end] + tail)
+        path.write_text(stub + block + tail)
         for mode in range(3):
             subprocess.run(['g++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
                             f'-DQCS_NCCL_BUFFER_MODE={mode}', str(path),
