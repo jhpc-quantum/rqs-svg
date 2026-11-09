@@ -3,10 +3,15 @@
 #include <cstdint>
 #include <limits>
 
+#ifdef __CUDACC__
+#define QCS_RACE_HD __host__ __device__
+#else
+#define QCS_RACE_HD
+#endif
 namespace qcs::race_detail {
 // Philox4x32-10: counter lanes encode the complete public cursor, rank and
 // domain. Distinct tuples never alias an input block (no cursor multiplication).
-inline uint64_t random_bits(uint64_t seed, uint64_t cursor, uint32_t rank, uint32_t domain) {
+QCS_RACE_HD inline uint64_t random_bits(uint64_t seed, uint64_t cursor, uint32_t rank, uint32_t domain) {
     uint32_t a = uint32_t(cursor), b = uint32_t(cursor >> 32), c = rank, d = domain;
     uint32_t k0 = uint32_t(seed), k1 = uint32_t(seed >> 32);
     for (int round = 0; round < 10; ++round) {
@@ -18,7 +23,7 @@ inline uint64_t random_bits(uint64_t seed, uint64_t cursor, uint32_t rank, uint3
     }
     return (uint64_t(a) << 32) | b;
 }
-inline double uniform(uint64_t seed, uint64_t cursor, uint32_t rank, uint32_t domain) {
+QCS_RACE_HD inline double uniform(uint64_t seed, uint64_t cursor, uint32_t rank, uint32_t domain) {
     // 52-bit midpoint grid is strictly inside (0,1), including both endpoints.
     return (double(random_bits(seed, cursor, rank, domain) >> 12) + 0.5) * 0x1p-52;
 }
@@ -38,7 +43,7 @@ inline candidate make_candidate(double mass, uint64_t index, uint32_t rank, doub
 }
 // OR and lexicographic minimum are associative and commutative. Status is
 // orthogonal to the winner: selecting a valid candidate cannot hide an error.
-inline candidate combine(candidate a, const candidate& b) {
+QCS_RACE_HD inline candidate combine(candidate a, const candidate& b) {
     unsigned status = a.status | b.status;
     if (b.valid && (!a.valid || b.key < a.key ||
         (b.key == a.key && (b.rank < a.rank || (b.rank == a.rank && b.index < a.index))))) a = b;
@@ -46,3 +51,5 @@ inline candidate combine(candidate a, const candidate& b) {
     return a;
 }
 } // namespace qcs::race_detail
+
+#undef QCS_RACE_HD

@@ -267,3 +267,16 @@ test-measurement-race-integration: $(MEASUREMENT_HARNESS_DIR)/measurement_integr
 TEST_BINARIES += $(MEASUREMENT_RACE_TEST)
 $(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/measurement_race.hpp
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_race.hpp
+
+MEASUREMENT_RACE_DEVICE_TEST ?= bin/measurement_race_device_test
+$(MEASUREMENT_RACE_DEVICE_TEST): tests/measurement_race_device_test.cu src/measurement_race_nccl.cuh src/measurement_race.hpp src/measurement_tiled_cdf.cuh
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(LDFLAGS_VENDOR) --cudart=shared
+.PHONY: test-measurement-race-device test-measurement-race-nccl-integration
+test-measurement-race-device: $(MEASUREMENT_RACE_DEVICE_TEST)
+	./$(MEASUREMENT_RACE_DEVICE_TEST)
+test-measurement-race-nccl-integration: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+	QCS_MEASUREMENT_BACKEND=tiled_race_nccl $(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+TEST_BINARIES += $(MEASUREMENT_RACE_DEVICE_TEST)
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/measurement_race_nccl.cuh
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_race_nccl.cuh

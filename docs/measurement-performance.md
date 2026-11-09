@@ -154,3 +154,11 @@ done
 Only run rank counts supported by the allocation. Populate comparisons from actual
 CSV results and stage costs from actual traces before selecting a backend or
 claiming a crossover. Auto retains its existing provisional policy.
+
+## NCCL exponential race experiment
+
+The opt-in `tiled_race_nccl` and MPI comparison `tiled_race` are accepted by the
+paired benchmark via `--backends tiled_race_nccl tiled_race tiled_cdf rank_sampled`.
+See [NCCL tiled race](tiled-race-nccl-measurement.md) for separate GPU candidate,
+communication, argmin, synchronization, and final readback tracing, numerical
+limits, and hardware validation status. No measured speedup is currently claimed.

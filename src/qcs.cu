@@ -2,6 +2,8 @@
 #include "measurement_backend.hpp"
 #include "measurement_tiled_cdf.cuh"
 #include "measurement_race.hpp"
+#include "measurement_race_nccl.cuh"
+#include <thread>
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
@@ -1250,6 +1252,8 @@ namespace qcs
         uint64_t measurement_counter = 0;
         bool measurement_counter_exhausted = false;
         bool rank_sampled_measurement = false;
+        bool tiled_race_nccl_measurement = false;
+        race_detail::candidate* race_selected_device = nullptr;
         bool tiled_race_measurement = false;
         uint64_t race_master_seed = 0;
         MPI_Datatype race_datatype = MPI_DATATYPE_NULL;
@@ -1272,8 +1276,8 @@ namespace qcs
         unsigned char* measurement_collective_send = nullptr;
         unsigned char* measurement_collective_receive = nullptr;
         static constexpr size_t measurement_collective_bytes =
-            sizeof(double) * 2 > sizeof(tiled_cdf_detail::rank_summary)
-            ? sizeof(double) * 2 : sizeof(tiled_cdf_detail::rank_summary);
+            std::max(sizeof(race_detail::candidate),
+                     std::max(sizeof(double) * 2, sizeof(tiled_cdf_detail::rank_summary)));
         std::unique_ptr<tiled_cdf_detail::workspace> tiled_workspace;
 
         int log_num_procs;
@@ -1393,12 +1397,13 @@ namespace qcs
             auto_measurement = mode == 2;
             tiled_cdf_measurement = mode == 3;
             tiled_race_measurement = mode == 4;
+            tiled_race_nccl_measurement = mode == 5;
             if (tiled_race_measurement) {
                 ATLC_CHECK_MPI(MPI_Type_contiguous, int(sizeof(race_detail::candidate)), MPI_BYTE, &race_datatype);
                 ATLC_CHECK_MPI(MPI_Type_commit, &race_datatype);
                 ATLC_CHECK_MPI(MPI_Op_create, reduce_race, 1, &race_operation);
             }
-            if (tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
+            if (tiled_race_nccl_measurement || tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
                 int ready = 1, all_ready = 0;
                 try {
                     tiled_rank_summaries.resize(num_procs);
@@ -1776,11 +1781,14 @@ namespace qcs
             scratch.allocate_remaining(stream, nccl_buffer_mode != 0);
             measurement_workspace = std::make_unique<measurement_detail::workspace>(stream, scratch.device);
             pauli_workspace = std::make_unique<pauli_detail::workspace>(*measurement_workspace, stream);
-            if (tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
+            if (tiled_race_nccl_measurement || tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
                 measurement_collective_send = static_cast<unsigned char*>(
                     scratch.device.take(measurement_collective_bytes));
                 measurement_collective_receive = static_cast<unsigned char*>(
                     scratch.device.take(size_t(num_procs) * measurement_collective_bytes));
+                if (tiled_race_nccl_measurement)
+                    race_selected_device = static_cast<race_detail::candidate*>(
+                        scratch.device.take(sizeof(race_detail::candidate)));
             }
             if constexpr (!exchange_nvshmem_registered_put)
             {
@@ -1806,6 +1814,7 @@ namespace qcs
                 ATLC_CHECK_CUDA(cudaStreamSynchronize, exchange_copy_stream);
             deregister_nccl_buffer(nccl_comm, scratch_registration);
             deregister_nccl_buffer(nccl_comm, state_registration);
+            race_selected_device = nullptr;
             tiled_workspace.reset();
             measurement_collective_send = measurement_collective_receive = nullptr;
             rank_sampling_workspace.close();
@@ -2917,6 +2926,97 @@ namespace qcs
                 results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
         }
 
+        void wait_measurement_nccl() {
+            for (;;) {
+                ncclResult_t error = ncclSuccess;
+                ATLC_CHECK_NCCL(ncclCommGetAsyncError, nccl_comm, &error);
+                check_buffer_nccl(error, "measurement NCCL asynchronous error");
+                auto completion = cudaStreamQuery(stream);
+                if (completion == cudaSuccess) return;
+                if (completion != cudaErrorNotReady) tiled_cdf_detail::check(completion);
+                std::this_thread::yield();
+            }
+        }
+
+        void measure_tiled_race_nccl(const std::vector<int>& qubits, std::vector<bit_t>& results)
+        {
+            QCS_MEASURE_RANGE("tiled_race_nccl.metadata_and_allocation");
+            uint64_t requested = 0;
+            for (int q : qubits) requested |= UINT64_C(1) << q;
+            uint64_t fresh = requested & ~measured_mask_logical;
+            uint64_t sampled = measured_value_logical;
+            if (fresh)
+            {
+                uint64_t mask = 0, value = 0;
+                bool active = true;
+                for (int q = 0; q < num_qubits; ++q)
+                    if (measured_mask_logical & (UINT64_C(1) << q)) {
+                        int p = perm_l2p[q];
+                        uint64_t b = (measured_value_logical >> q) & 1;
+                        if (p < num_qubits_local) {
+                            mask |= UINT64_C(1) << p;
+                            value |= b << p;
+                        } else if (((uint64_t(proc_num) >> (p - num_qubits_local)) & 1) != b)
+                            active = false;
+                    }
+                // Allocate all commit storage before entering the collective protocol.
+                // Any recoverable local build failure is carried by the candidate.
+                unsigned failure = 0;
+                const tiled_cdf_detail::rank_summary* summary = nullptr;
+                const tiled_cdf_detail::sample_result* result = nullptr;
+                QCS_MEASURE_STAGE("tiled_race_nccl.hierarchy_and_local_sample");
+                try {
+                    measured_1_qubit_num_logical_list.reserve(num_qubits);
+                    measured_0_qubit_num_logical_list.reserve(num_qubits);
+                    if (measurement_counter_exhausted)
+                        throw std::runtime_error("measurement RNG counter exhausted");
+                    if (!tiled_workspace)
+                        tiled_workspace = std::make_unique<tiled_cdf_detail::workspace>(stream);
+                    summary = tiled_workspace->build(state_data_device, num_states_local, mask, value, active);
+                    result = tiled_workspace->draw(race_detail::uniform(
+                        race_master_seed, measurement_counter, uint32_t(proc_num), 0));
+                } catch (...) { failure = 1; }
+                race_detail::candidate winner{};
+                QCS_MEASURE_STAGE("tiled_race_nccl.exchange_and_selection");
+                measurement_transport([&] {
+                    auto* local = reinterpret_cast<race_detail::candidate*>(measurement_collective_send);
+                    auto* all = reinterpret_cast<race_detail::candidate*>(measurement_collective_receive);
+                    QCS_MEASURE_RANGE("tiled_race_nccl.candidate_generation");
+                    race_detail::prepare_candidate<<<1, 1, 0, stream>>>(summary, result, local,
+                        race_master_seed, measurement_counter, uint32_t(proc_num), num_states_local, failure);
+                    ATLC_CHECK_CUDA(cudaGetLastError);
+                    QCS_MEASURE_STAGE("tiled_race_nccl.allgather");
+                    ATLC_CHECK_NCCL(ncclAllGather, local, all, sizeof(race_detail::candidate),
+                                    ncclUint8, nccl_comm, stream);
+                    QCS_MEASURE_STAGE("tiled_race_nccl.argmin_selection");
+                    race_detail::select_candidate<<<1, 1, 0, stream>>>(all, num_procs, race_selected_device);
+                    ATLC_CHECK_CUDA(cudaGetLastError);
+                    QCS_MEASURE_STAGE("tiled_race_nccl.synchronization");
+                    wait_measurement_nccl();
+                    QCS_MEASURE_STAGE("tiled_race_nccl.final_result_transfer");
+                    ATLC_CHECK_CUDA(cudaMemcpyAsync, &winner, race_selected_device,
+                                   sizeof(winner), cudaMemcpyDeviceToHost, stream);
+                    wait_measurement_nccl();
+                });
+                if (winner.status || !winner.valid)
+                    throw std::runtime_error("invalid tiled NCCL race distribution or local sampling failure");
+                QCS_MEASURE_STAGE("tiled_race_nccl.metadata_update");
+                uint64_t physical = winner.index;
+                for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {
+                    uint64_t b = (physical >> perm_l2p[q]) & 1;
+                    sampled = (sampled & ~(UINT64_C(1) << q)) | (b << q);
+                    (b ? measured_1_qubit_num_logical_list : measured_0_qubit_num_logical_list).push_back(q);
+                }
+                measured_mask_logical |= fresh;
+                measured_value_logical = sampled;
+                pending_projection_mask_logical |= fresh;
+                if (measurement_counter == UINT64_MAX) measurement_counter_exhausted = true;
+                else ++measurement_counter;
+            }
+            for (size_t i = 0; i < qubits.size(); ++i)
+                results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
+        }
+
         void measure_rank_sampled(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
             QCS_MEASURE_RANGE("rank_sampled.metadata_and_allocation");
@@ -3067,7 +3167,8 @@ namespace qcs
 
         void measure_many(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
-            if (tiled_race_measurement) measure_tiled_race(qubits, results);
+            if (tiled_race_nccl_measurement) measure_tiled_race_nccl(qubits, results);
+            else if (tiled_race_measurement) measure_tiled_race(qubits, results);
             else if (tiled_cdf_measurement) measure_tiled_cdf(qubits, results);
             else if (use_rank_sampling(qubits)) measure_rank_sampled(qubits, results);
             else measure_qubit_groups(qubits, results);
@@ -3076,10 +3177,11 @@ namespace qcs
         int measure_qubit(int const qubit)
         {
             if (qubit < 0 || qubit >= num_qubits) throw std::runtime_error("qubit is out of range");
-            if (!tiled_race_measurement && !tiled_cdf_measurement && !use_rank_sampling({qubit}))
+            if (!tiled_race_nccl_measurement && !tiled_race_measurement && !tiled_cdf_measurement && !use_rank_sampling({qubit}))
                 return static_cast<int>(measure_qubits<1>({qubit}));
             std::vector<bit_t> result(1);
-            if (tiled_race_measurement) measure_tiled_race({qubit}, result);
+            if (tiled_race_nccl_measurement) measure_tiled_race_nccl({qubit}, result);
+            else if (tiled_race_measurement) measure_tiled_race({qubit}, result);
             else if (tiled_cdf_measurement) measure_tiled_cdf({qubit}, result);
             else measure_rank_sampled({qubit}, result);
             return result[0];

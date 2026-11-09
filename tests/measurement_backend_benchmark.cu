@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
             if (!c.proc_num) {
                 const char* layouts[] = {"local", "global", "mixed", "full"};
                 const char* modes[] = {"none", "partial", "all"};
-                std::cout << (c.tiled_race_measurement ? "tiled_race" : c.tiled_cdf_measurement ? "tiled_cdf" : c.auto_measurement ? "auto" : c.rank_sampled_measurement ? "rank_sampled" : "grouped") << ',' << n << ','
+                std::cout << (c.tiled_race_nccl_measurement ? "tiled_race_nccl" : c.tiled_race_measurement ? "tiled_race" : c.tiled_cdf_measurement ? "tiled_cdf" : c.auto_measurement ? "auto" : c.rank_sampled_measurement ? "rank_sampled" : "grouped") << ',' << n << ','
                     << c.num_procs << ',' << nodes << ',' << states[kind] << ',' << count << ',' << layouts[layout]
                     << ',' << modes[deferred] << ',' << (mapping ? "rotated" : "identity") << ',' << warmups << ',' << repetitions << std::setprecision(12);
                 std::cout << ',' << first_call;

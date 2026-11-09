@@ -13,7 +13,7 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     } else if (c.use_rank_sampling(dispatch_targets)) {
         throw std::runtime_error("auto single-target dispatch regression");
     }
-    if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement && !c.tiled_race_measurement) return;
+    if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement && !c.tiled_race_measurement && !c.tiled_race_nccl_measurement) return;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("rank sampling metadata regression"); };
     c.initialize_selected_state();
     {
@@ -117,7 +117,7 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     check(c.measurement_counter == before_local_failure + 1);
     c.initialize_selected_state();
 
-    if (c.tiled_race_measurement) {
+    if (c.tiled_race_measurement || c.tiled_race_nccl_measurement) {
         // One supported rank; finite effective masses near both double limits.
         // The smallest value stays normal to avoid GPU denormal mode dependence.
         for (double amplitude : {1e-150, 1e150}) {
