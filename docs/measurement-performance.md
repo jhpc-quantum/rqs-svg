@@ -1,6 +1,8 @@
 # Distributed measurement performance
 
 Current source audit and host baseline: [measurement baseline](measurement-baseline.md).
+Automatic dispatch rules, evidence limits and the proposed successor policy:
+[automatic measurement dispatch](measurement-auto.md).
 
 The paired benchmark covers `grouped`, `rank_sampled`, `tiled_cdf`, and `auto`.
 Production backend implementations and automatic dispatch policy are preserved.
