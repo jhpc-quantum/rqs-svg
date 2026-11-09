@@ -1253,6 +1253,13 @@ namespace qcs
         bool auto_measurement = false;
         rank_sampling_detail::workspace rank_sampling_workspace;
         std::vector<tiled_cdf_detail::rank_summary> tiled_rank_summaries;
+        // Byte collectives preserve host long-double precision without requiring
+        // an NCCL arithmetic datatype. Ranks must use the same host ABI.
+        unsigned char* measurement_collective_send = nullptr;
+        unsigned char* measurement_collective_receive = nullptr;
+        static constexpr size_t measurement_collective_bytes =
+            sizeof(long double) * 2 > sizeof(tiled_cdf_detail::rank_summary)
+            ? sizeof(long double) * 2 : sizeof(tiled_cdf_detail::rank_summary);
         std::unique_ptr<tiled_cdf_detail::workspace> tiled_workspace;
 
         int log_num_procs;
@@ -1370,12 +1377,16 @@ namespace qcs
             rank_sampled_measurement = mode == 1;
             auto_measurement = mode == 2;
             tiled_cdf_measurement = mode == 3;
-            if (tiled_cdf_measurement) {
+            if (tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
                 int ready = 1, all_ready = 0;
-                try { tiled_rank_summaries.resize(num_procs); }
+                try {
+                    tiled_rank_summaries.resize(num_procs);
+                    rank_sampling_workspace.exchange.resize(size_t(num_procs) * 2);
+                    rank_sampling_workspace.masses.resize(num_procs);
+                }
                 catch (...) { ready = 0; }
                 ATLC_CHECK_MPI(MPI_Allreduce, &ready, &all_ready, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-                if (!all_ready) throw std::runtime_error("tiled CDF rank storage allocation failed");
+                if (!all_ready) throw std::runtime_error("measurement rank storage allocation failed");
             }
 
             // Check before creating the communicator, including mixed binaries.
@@ -1742,6 +1753,12 @@ namespace qcs
             scratch.allocate_remaining(stream, nccl_buffer_mode != 0);
             measurement_workspace = std::make_unique<measurement_detail::workspace>(stream, scratch.device);
             pauli_workspace = std::make_unique<pauli_detail::workspace>(*measurement_workspace, stream);
+            if (tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
+                measurement_collective_send = static_cast<unsigned char*>(
+                    scratch.device.take(measurement_collective_bytes));
+                measurement_collective_receive = static_cast<unsigned char*>(
+                    scratch.device.take(size_t(num_procs) * measurement_collective_bytes));
+            }
             if constexpr (!exchange_nvshmem_registered_put)
             {
                 uint64_t const available = scratch.device.available() / sizeof(qcs::complex_t);
@@ -1767,6 +1784,7 @@ namespace qcs
             deregister_nccl_buffer(nccl_comm, scratch_registration);
             deregister_nccl_buffer(nccl_comm, state_registration);
             tiled_workspace.reset();
+            measurement_collective_send = measurement_collective_receive = nullptr;
             rank_sampling_workspace.close();
             pauli_workspace.reset();
             if (measurement_workspace)
@@ -2651,6 +2669,54 @@ namespace qcs
             return outcome;
         }
 
+        // A broken CUDA context or transport cannot safely carry a failure
+        // sentinel. Abort the job rather than leave peers waiting in NCCL.
+        template<class F> void measurement_transport(F operation)
+        {
+            try { operation(); }
+            catch (...) {
+                fprintf(stderr, "[error] rank %d: measurement CUDA/NCCL transport failed; aborting job\n", proc_num);
+                ncclCommAbort(nccl_comm);
+                nccl_comm = nullptr;
+                MPI_Abort(MPI_COMM_WORLD, 1);
+                throw;
+            }
+        }
+
+        void measurement_allgather(const void* source, void* output,
+                                   size_t bytes, bool device_source = false)
+        {
+            measurement_transport([&] {
+                const void* input = source;
+                if (!device_source) {
+                    ATLC_CHECK_CUDA(cudaMemcpyAsync, measurement_collective_send,
+                        source, bytes, cudaMemcpyHostToDevice, stream);
+                    input = measurement_collective_send;
+                }
+                ATLC_CHECK_NCCL(ncclAllGather, input, measurement_collective_receive,
+                    bytes, ncclUint8, nccl_comm, stream);
+                ATLC_CHECK_CUDA(cudaMemcpyAsync, output, measurement_collective_receive,
+                    bytes * size_t(num_procs), cudaMemcpyDeviceToHost, stream);
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            });
+        }
+
+        void measurement_broadcast(void* output, size_t bytes, int owner,
+                                   const void* device_source = nullptr)
+        {
+            measurement_transport([&] {
+                if (proc_num == owner && !device_source)
+                    ATLC_CHECK_CUDA(cudaMemcpyAsync, measurement_collective_send,
+                        output, bytes, cudaMemcpyHostToDevice, stream);
+                const void* input = device_source ? device_source : measurement_collective_send;
+                ATLC_CHECK_NCCL(ncclBroadcast, input, measurement_collective_receive,
+                    bytes, ncclUint8, owner, nccl_comm, stream);
+                ATLC_CHECK_CUDA(cudaMemcpyAsync, output, measurement_collective_receive,
+                    bytes, cudaMemcpyDeviceToHost, stream);
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            });
+        }
+
         void measure_tiled_cdf(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
             QCS_MEASURE_RANGE("tiled_cdf.metadata_and_allocation");
@@ -2676,6 +2742,7 @@ namespace qcs
                 // Any recoverable local build failure is carried by the summary.
                 tiled_cdf_detail::rank_summary summary{};
                 auto& ranks = tiled_rank_summaries;
+                const tiled_cdf_detail::rank_summary* device_summary = nullptr;
                 try {
                     measured_1_qubit_num_logical_list.reserve(num_qubits);
                     measured_0_qubit_num_logical_list.reserve(num_qubits);
@@ -2683,22 +2750,19 @@ namespace qcs
                         throw std::runtime_error("measurement RNG counter exhausted");
                     if (!tiled_workspace)
                         tiled_workspace = std::make_unique<tiled_cdf_detail::workspace>(stream);
-                    auto* device_summary = tiled_workspace->build(state_data_device, num_states_local,
+                    device_summary = tiled_workspace->build(state_data_device, num_states_local,
                                                         mask, value, active);
                     rank_sampling_detail::tiled_uniform<<<1, 1, 0, stream>>>(
                         const_cast<tiled_cdf_detail::rank_summary*>(device_summary),
                         rng_seed, measurement_counter);
                     tiled_cdf_detail::check(cudaGetLastError());
-                    QCS_MEASURE_STAGE("tiled_cdf.scalar_readback_and_wait");
-                    tiled_cdf_detail::check(cudaMemcpyAsync(&summary, device_summary,
-                        sizeof(summary), cudaMemcpyDeviceToHost, stream));
-                    tiled_cdf_detail::check(cudaStreamSynchronize(stream));
                 } catch (...) {
                     summary.status = tiled_cdf_detail::invalid_distribution;
+                    device_summary = nullptr;
                 }
                 QCS_MEASURE_STAGE("tiled_cdf.rank_exchange");
-                ATLC_CHECK_MPI(MPI_Allgather, &summary, int(sizeof(summary)), MPI_BYTE,
-                               ranks.data(), int(sizeof(summary)), MPI_BYTE, MPI_COMM_WORLD);
+                measurement_allgather(device_summary ? static_cast<const void*>(device_summary) : &summary,
+                                      ranks.data(), sizeof(summary), device_summary != nullptr);
                 QCS_MEASURE_STAGE("tiled_cdf.rank_selection");
                 long double total = 0;
                 for (const auto& r : ranks) {
@@ -2726,20 +2790,17 @@ namespace qcs
                 tiled_cdf_detail::sample_result result{UINT64_MAX,
                                                        tiled_cdf_detail::invalid_distribution};
                 QCS_MEASURE_STAGE("tiled_cdf.gpu_tile_lookup_and_amplitude_sampling");
+                const tiled_cdf_detail::sample_result* device_result = nullptr;
                 if (proc_num == selected) {
                     try {
-                        const auto* device_result = tiled_workspace->draw(fraction);
-                        QCS_MEASURE_STAGE("tiled_cdf.owner_readback_and_wait");
-                        tiled_cdf_detail::check(cudaMemcpyAsync(&result, device_result,
-                            sizeof(result), cudaMemcpyDeviceToHost, stream));
-                        tiled_cdf_detail::check(cudaStreamSynchronize(stream));
+                        device_result = tiled_workspace->draw(fraction);
                     } catch (...) {
+                        device_result = nullptr;
                         result = {UINT64_MAX, tiled_cdf_detail::invalid_distribution};
                     }
                 }
                 QCS_MEASURE_STAGE("tiled_cdf.result_broadcast");
-                ATLC_CHECK_MPI(MPI_Bcast, &result, int(sizeof(result)), MPI_BYTE,
-                               selected, MPI_COMM_WORLD);
+                measurement_broadcast(&result, sizeof(result), selected, device_result);
                 if (result.status || result.index >= num_states_local)
                     throw std::runtime_error("invalid tiled CDF owner sample");
                 QCS_MEASURE_STAGE("tiled_cdf.metadata_update");
@@ -2769,8 +2830,6 @@ namespace qcs
             uint64_t sampled = measured_value_logical;
             if (fresh)
             {
-                if (measurement_counter_exhausted)
-                    throw std::runtime_error("measurement RNG counter exhausted");
                 uint64_t mask = 0, value = 0;
                 bool active = true;
                 for (int q = 0; q < num_qubits; ++q)
@@ -2785,36 +2844,45 @@ namespace qcs
                     }
                 size_t chunks = (num_states_local + rank_sampling_detail::chunk_size - 1) /
                                 rank_sampling_detail::chunk_size;
-                rank_sampling_workspace.reserve(chunks, num_procs);
-                double* device = rank_sampling_workspace.device;
+                double* device = nullptr;
                 auto& weights = rank_sampling_workspace.weights;
                 auto& masses = rank_sampling_workspace.masses;
                 auto& exchange = rank_sampling_workspace.exchange;
-                QCS_MEASURE_STAGE("rank_sampled.local_mass");
-                rank_sampling_detail::chunk_weights<<<std::min<size_t>(chunks, 65535), 256, 0, stream>>>(
-                    state_data_device, num_states_local, mask, value, active,
-                    device, device + chunks, rng_seed, measurement_counter);
-                if (cudaGetLastError() != cudaSuccess)
-                    throw std::runtime_error("rank sampling CUDA launch failed");
-                QCS_MEASURE_STAGE("rank_sampled.device_to_host_and_wait");
-                ATLC_CHECK_CUDA(cudaMemcpyAsync, weights.data(), device,
-                                weights.size() * sizeof(double), cudaMemcpyDeviceToHost, stream);
-                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
-                QCS_MEASURE_STAGE("rank_sampled.host_mass_sum");
-                long double mass = 0;
-                for (size_t i = 0; i < chunks; ++i) {
-                    if (!std::isfinite(weights[i]) || weights[i] < 0) {
-                        mass = -1;
-                        break;
+                long double mass = -1;
+                double uniform_local = 0;
+                try {
+                    measured_1_qubit_num_logical_list.reserve(num_qubits);
+                    measured_0_qubit_num_logical_list.reserve(num_qubits);
+                    if (measurement_counter_exhausted)
+                        throw std::runtime_error("measurement RNG counter exhausted");
+                    rank_sampling_workspace.reserve(chunks, num_procs);
+                    device = rank_sampling_workspace.device;
+                    QCS_MEASURE_STAGE("rank_sampled.local_mass");
+                    rank_sampling_detail::chunk_weights<<<std::min<size_t>(chunks, 65535), 256, 0, stream>>>(
+                        state_data_device, num_states_local, mask, value, active,
+                        device, device + chunks, rng_seed, measurement_counter);
+                    if (cudaGetLastError() != cudaSuccess)
+                        throw std::runtime_error("rank sampling CUDA launch failed");
+                    QCS_MEASURE_STAGE("rank_sampled.device_to_host_and_wait");
+                    ATLC_CHECK_CUDA(cudaMemcpyAsync, weights.data(), device,
+                                    weights.size() * sizeof(double), cudaMemcpyDeviceToHost, stream);
+                    ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                    QCS_MEASURE_STAGE("rank_sampled.host_mass_sum");
+                    mass = 0;
+                    for (size_t i = 0; i < chunks; ++i) {
+                        if (!std::isfinite(weights[i]) || weights[i] < 0) {
+                            mass = -1;
+                            break;
+                        }
+                        mass += weights[i];
                     }
-                    mass += weights[i];
-                }
+                    uniform_local = weights[chunks];
+                } catch (...) { mass = -1; }
                 // Include the authoritative rank-zero draw in the mass exchange:
                 // no separate broadcast or rank-dependent dispatch collective.
-                long double payload[2] = {mass, static_cast<long double>(weights[chunks])};
+                long double payload[2] = {mass, static_cast<long double>(uniform_local)};
                 QCS_MEASURE_STAGE("rank_sampled.rank_mass_collection");
-                ATLC_CHECK_MPI(MPI_Allgather, payload, 2, MPI_LONG_DOUBLE,
-                               exchange.data(), 2, MPI_LONG_DOUBLE, MPI_COMM_WORLD);
+                measurement_allgather(payload, exchange.data(), sizeof(payload));
                 for (int rank = 0; rank < num_procs; ++rank) masses[rank] = exchange[2 * rank];
                 QCS_MEASURE_STAGE("rank_sampled.rank_selection");
                 long double total = 0;
@@ -2827,6 +2895,8 @@ namespace qcs
                     throw std::runtime_error("invalid measurement norm");
                 // Rank zero supplies the authoritative draw, even if seeds differ.
                 double uniform = static_cast<double>(exchange[1]);
+                if (!std::isfinite(uniform) || uniform < 0 || uniform >= 1)
+                    throw std::runtime_error("invalid measurement uniform");
                 auto select = [](const auto& bins, size_t count, long double& threshold) {
                     size_t last = 0;
                     for (size_t i = 0; i < count; ++i) if (bins[i] > 0) {
@@ -2841,6 +2911,7 @@ namespace qcs
                                                 std::nextafter(total, 0.0L));
                 int selected = static_cast<int>(select(masses, masses.size(), threshold));
                 uint64_t index = UINT64_MAX;
+                const uint64_t* device_index = nullptr;
                 QCS_MEASURE_STAGE("rank_sampled.owner_local_sampling");
                 if (proc_num == selected) {
                     // Rank CDF residual is already a conditional local draw.
@@ -2853,18 +2924,14 @@ namespace qcs
                             state_data_device, num_states_local, chunk, mask, value, fraction, index_device);
                         if (cudaGetLastError() != cudaSuccess)
                             throw std::runtime_error("rank sampling CUDA launch failed");
-                        ATLC_CHECK_CUDA(cudaMemcpyAsync, &index, index_device, sizeof(index),
-                                        cudaMemcpyDeviceToHost, stream);
-                        ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                        device_index = index_device;
                     } catch (...) {
-                        // Broadcast the failure sentinel so peers cannot wait
-                        // forever when sampling fails only on the chosen rank.
                         index = UINT64_MAX;
                     }
                 }
                 QCS_MEASURE_STAGE("rank_sampled.result_broadcast");
-                ATLC_CHECK_MPI(MPI_Bcast, &index, 1, MPI_UINT64_T, selected, MPI_COMM_WORLD);
-                if (index == UINT64_MAX) throw std::runtime_error("invalid local measurement norm");
+                measurement_broadcast(&index, sizeof(index), selected, device_index);
+                if (index >= num_states_local) throw std::runtime_error("invalid local measurement norm");
                 QCS_MEASURE_STAGE("rank_sampled.metadata_update");
                 uint64_t physical = index | (uint64_t(selected) << num_qubits_local);
                 for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {

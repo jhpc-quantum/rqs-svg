@@ -19,11 +19,11 @@ global conditions exclude incompatible ranks without modifying the state.
 Host chunk weights use O(local state size / 4096) storage; rank weights use
 O(rank count). No histogram of requested outcomes is allocated.
 
-An MPI all-gather exchanges rank masses and draws. Rank zero supplies one Philox
+An NCCL byte all-gather exchanges rank masses and draws. Rank zero supplies one Philox
 uniform draw using the existing seed/counter mapping. The rank CDF residual selects a
 chunk on the chosen rank; a CUDA scan of that chunk samples a local basis index.
 The selected rank broadcasts the index and all ranks extract requested physical
-bits into caller order. Communication uses two MPI collectives per call with
+bits into caller order. Communication uses two NCCL collectives per call with
 fresh targets, independent of target count. Already recorded targets need no
 communication or random draw. Invalid weights/norms leave metadata and the RNG
 cursor unchanged. The last counter value can be used once before exhaustion.
@@ -49,7 +49,7 @@ No builds, tests, or validation commands were run for this implementation, as
 requested. CUDA/MPI correctness and performance remain unverified. The
 implementation retains device and host buffers across calls and uses warp
 reductions within each chunk. It still copies chunk weights to the host; large-state
-memory traffic, host summation, serial owner sampling and MPI latency may limit
+memory traffic, host summation, serial owner sampling and NCCL latency may limit
 performance. Device storage grows lazily and is released with simulator memory.
 It does not promise improvement over the grouped backend.
 
@@ -89,3 +89,6 @@ measurement distribution and metadata semantics.
 
 Independent GPU primitives for the planned tiled-CDF backend are documented in
 [tiled CDF primitives](tiled-cdf-primitives.md); they do not change this backend.
+
+See [NCCL measurement communication](measurement-nccl.md) for buffer ordering,
+precision, failure handling, and pending GPU validation.

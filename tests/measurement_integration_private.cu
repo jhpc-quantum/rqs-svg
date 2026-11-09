@@ -16,8 +16,8 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement) return;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("rank sampling metadata regression"); };
     c.initialize_selected_state();
-    if (c.tiled_cdf_measurement) {
-        check(!c.use_rank_sampling(dispatch_targets));
+    {
+        check(c.use_rank_sampling(dispatch_targets) == c.rank_sampled_measurement);
         c.measurement_counter = (UINT64_C(1) << 32) + 17;
         // Full-register correlated, nonuniform distribution spanning tiles and ranks.
         std::vector<int> all;
@@ -97,6 +97,25 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     check(rejected && c.measured_mask_logical == 0);
     c.measurement_counter = cursor + 2;
     c.measurement_counter_exhausted = false;
+
+    // A local pre-collective failure must reject on every rank and permit retry.
+    c.initialize_selected_state();
+    c.measurement_counter_exhausted = c.proc_num == c.num_procs - 1;
+    auto before_local_failure = c.measurement_counter;
+    std::fill(result.begin(), result.end(), bit_t(7));
+    rejected = false;
+    try { c.measure_many(targets, result); }
+    catch (const std::runtime_error&) { rejected = true; }
+    int failures = 0, local_failure = rejected;
+    ATLC_CHECK_MPI(MPI_Allreduce, &local_failure, &failures, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    check(failures == c.num_procs);
+    check(c.measurement_counter == before_local_failure && c.measured_mask_logical == 0);
+    check(c.pending_projection_mask_logical == 0);
+    check(std::all_of(result.begin(), result.end(), [](bit_t b) { return b == 7; }));
+    c.measurement_counter_exhausted = false;
+    c.measure_many(targets, result);
+    check(c.measurement_counter == before_local_failure + 1);
+    c.initialize_selected_state();
 
     // Invalid effective norms must fail collectively without consuming a draw.
     for (double amplitude : {0.0, std::numeric_limits<double>::quiet_NaN(),

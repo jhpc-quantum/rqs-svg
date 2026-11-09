@@ -21,9 +21,9 @@ advances the lifetime counter once, including the final usable UINT64_MAX value.
 Build failures travel in the rank summary; owner failures travel in the result
 broadcast. Neither commits results or measurement metadata. Zero-mass ranks are
 valid; invalid components or a globally zero norm fail on all ranks. CUDA context
-loss and MPI transport failures are outside recoverable-error guarantees.
+loss and NCCL transport failures are outside recoverable-error guarantees.
 
-The successful fresh path uses two MPI measurement collectives, regardless of
+The successful fresh path uses two NCCL measurement collectives, regardless of
 request width. Rank-summary allocation and backend validation happen at setup.
 The numerical interval rules inside a rank are those of the tiled primitives:
 see [GPU primitive details](tiled-cdf-primitives.md).
@@ -72,3 +72,6 @@ Passed locally:
 and failed because `nvcc` is unavailable. MPI compiler/runtime and NVIDIA runtime
 tools are also unavailable here. CUDA compilation, GPU primitive execution, and
 the entire 1/2/4/8-rank, two-placement runtime matrix remain unvalidated.
+
+See [NCCL measurement communication](measurement-nccl.md) for buffer ordering,
+precision, failure handling, and pending GPU validation.
