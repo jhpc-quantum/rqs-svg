@@ -26,6 +26,9 @@ int main(int argc, char** argv) {
         int n = argc > 1 ? std::stoi(argv[1]) : 33;
         int warmups = argc > 2 ? std::stoi(argv[2]) : 5;
         int repetitions = argc > 3 ? std::stoi(argv[3]) : 30;
+        bool global_only = argc > 4 && std::string(argv[4]) == "global-only";
+        if (global_only && c.num_procs == 1)
+            throw std::runtime_error("global-only benchmark requires multiple ranks");
         if (n < c.log_num_procs + 1 || n > 33 || warmups < 1 || repetitions < 1 ||
             c.num_procs > 128 || (c.num_procs & (c.num_procs - 1)))
             throw std::runtime_error("expected qubits <=33, >=1 local qubit, positive warmups/repetitions, 1..128 power-of-two ranks");
@@ -52,6 +55,7 @@ int main(int argc, char** argv) {
         for (int kind = 0; kind < 5; ++kind) for (int count : counts)
         for (int mapping = 0; mapping < 2; ++mapping)
         for (int layout = 0; layout < 4; ++layout) for (int deferred = 0; deferred < 3; ++deferred) {
+            if (global_only && (layout != 1 || deferred == 2)) continue;
             if (count > n || (layout == 0 && count > c.num_qubits_local) ||
                 (layout == 1 && count > c.log_num_procs) ||
                 (layout == 2 && (count < 2 || !c.log_num_procs || count > n)) ||

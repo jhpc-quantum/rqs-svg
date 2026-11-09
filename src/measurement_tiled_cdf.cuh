@@ -95,7 +95,7 @@ __global__ void cdf_scan(const double* masses, double* cdf, uint64_t tiles,
         batch[threadIdx.x] = i < tiles ? masses[i] : 0;
         __syncthreads();
         scan<threads>(batch);
-        if (i < tiles) cdf[i] = __dadd_rn(carry, batch[threadIdx.x]);
+        if (cdf && i < tiles) cdf[i] = __dadd_rn(carry, batch[threadIdx.x]);
         __syncthreads();
         if (threadIdx.x == 0) carry = __dadd_rn(carry, batch[threads-1]);
         __syncthreads();
@@ -234,7 +234,7 @@ public:
         result_ = reinterpret_cast<sample_result*>(summary_ + 1);
     }
     const rank_summary* build(const state_type* state, uint64_t count,
-                             uint64_t mask = 0, uint64_t value = 0, bool active = true) {
+                             uint64_t mask = 0, uint64_t value = 0, bool active = true, bool build_cdf = true) {
         owner();
         if ((active && count && !state) || (value & ~mask))
             throw std::invalid_argument("tiled CDF invalid state or conditioning");
@@ -251,8 +251,10 @@ public:
             check(cudaGetLastError());
         }
         QCS_MEASURE_STAGE("tiled_cdf.device_cdf_construction");
-        cdf_scan<<<1, threads, 0, stream_>>>(masses_, cdf_, tiles, summary_);
-        check(cudaGetLastError()); built_ = true;
+        // Retain the identical scan arithmetic and validation for rank mass;
+        // omit all tile-prefix stores when no local sample can be requested.
+        cdf_scan<<<1, threads, 0, stream_>>>(masses_, build_cdf ? cdf_ : nullptr, tiles, summary_);
+        check(cudaGetLastError()); built_ = build_cdf;
         return summary_;
     }
     const sample_result* draw(double uniform) {

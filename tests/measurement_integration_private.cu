@@ -77,6 +77,88 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
         check(std::abs(c.expectation_pauli(&global, &px, 1, 1.0) - 1.0) < 1e-11);
         c.initialize_selected_state();
     }
+    if (c.num_procs > 1 && (c.rank_sampled_measurement || c.tiled_cdf_measurement)) {
+        auto mapping = c.initial_perm_p2l;
+        auto seed = c.rng_seed;
+        for (bool reversed : {false, true}) {
+            for (int p = 0; p < c.num_qubits; ++p)
+                c.initial_perm_p2l[p] = reversed ? c.num_qubits - 1 - p : p;
+            c.reinitialize_mapping();
+            std::vector<int> globals;
+            for (int p = c.num_qubits - 1; p >= c.num_qubits_local; --p)
+                globals.push_back(c.perm_p2l[p]);
+            int local = c.perm_p2l[0];
+            for (bool cached_local : {false, true}) for (bool cached_global : {false, true}) for (int mode = 0; mode < 6; ++mode) {
+                // Compare the fast path to the unchanged local-index path with
+                // the same counter, including rank-zero's authoritative draw.
+                for (int shot = 0; shot < 32; ++shot) {
+                    uint64_t cursor = c.measurement_counter;
+                    std::vector<bit_t> fast;
+                    for (bool reference : {false, true}) {
+                        c.initialize_selected_state();
+                        c.measurement_counter = cursor;
+                        c.rng_seed = seed + c.proc_num;
+                        std::vector<qcs::complex_t> state(c.num_states_local, qcs::complex_t(0, 0));
+                        double amplitude = mode == 0 ? std::sqrt(double(c.proc_num + 1)) :
+                            mode == 1 ? (c.proc_num == c.num_procs - 1 ? 1.0 : 0.0) :
+                            mode == 2 ? 0.0 : mode == 3 ? std::numeric_limits<double>::quiet_NaN() :
+                            mode == 4 ? std::numeric_limits<double>::infinity() : 1.0;
+                        if (mode >= 3 && mode <= 4 && c.proc_num != c.num_procs - 1) amplitude = 1;
+                        state[cached_local ? 1 : 0] = qcs::complex_t(amplitude, 0);
+                        ATLC_CHECK_CUDA(cudaMemcpyAsync, c.state_data_device, state.data(),
+                            state.size()*sizeof(state[0]), cudaMemcpyHostToDevice, c.stream);
+                        if (cached_local) {
+                            c.measured_mask_logical = UINT64_C(1) << local;
+                            c.measured_value_logical = c.measured_mask_logical;
+                            c.pending_projection_mask_logical = c.measured_mask_logical;
+                            c.measured_1_qubit_num_logical_list.push_back(local);
+                        }
+                        if (cached_global && globals.size() > 1) {
+                            uint64_t bit = UINT64_C(1) << globals.back();
+                            c.measured_mask_logical |= bit;
+                            c.measured_value_logical |= bit;
+                            c.pending_projection_mask_logical |= bit;
+                            c.measured_1_qubit_num_logical_list.push_back(globals.back());
+                        }
+                        // A failure on a zero-mass rank must still reject globally.
+                        c.measurement_counter_exhausted = mode == 5 && c.proc_num == 0;
+                        auto targets = globals;
+                        if (cached_local) targets.insert(targets.begin(), local);
+                        if (reference) targets.push_back(c.perm_p2l[1]);
+                        std::vector<bit_t> bits(targets.size(), bit_t(7));
+                        auto mask = c.measured_mask_logical;
+                        auto value = c.measured_value_logical;
+                        auto ones = c.measured_1_qubit_num_logical_list;
+                        auto zeros = c.measured_0_qubit_num_logical_list;
+                        bool rejected = false;
+                        try { c.measure_many(targets, bits); }
+                        catch (const std::runtime_error&) { rejected = true; }
+                        check(rejected == (mode >= 2));
+                        if (rejected) {
+                            check(c.measurement_counter == cursor && c.measured_mask_logical == mask);
+                            check(c.measured_value_logical == value && c.pending_projection_mask_logical == mask);
+                            check(c.measured_1_qubit_num_logical_list == ones && c.measured_0_qubit_num_logical_list == zeros);
+                            check(std::all_of(bits.begin(), bits.end(), [](bit_t b) { return b == 7; }));
+                        } else {
+                            check(c.measurement_counter == cursor + 1);
+                            if (cached_local) check(bits[0] == 1);
+                            if (mode == 1)
+                                for (size_t j = cached_local; j < globals.size() + cached_local; ++j) check(bits[j] == 1);
+                            if (!reference) fast = bits;
+                            else check(std::equal(fast.begin(), fast.end(), bits.begin()));
+                            auto cached = bits;
+                            c.measure_many(targets, bits);
+                            check(bits == cached && c.measurement_counter == cursor + 1);
+                        }
+                        c.measurement_counter_exhausted = false;
+                    }
+                }
+            }
+        }
+        c.rng_seed = seed;
+        c.initial_perm_p2l = mapping;
+        c.initialize_selected_state();
+    }
     std::vector<int> targets{9, 2, 7, 0, 5, 1, 8, 3, 6, 4};
     std::vector<bit_t> result(targets.size());
     auto cursor = c.measurement_counter;

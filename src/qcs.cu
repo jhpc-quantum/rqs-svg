@@ -2758,6 +2758,11 @@ namespace qcs
             uint64_t sampled = measured_value_logical;
             if (fresh)
             {
+                // Only replicated request/cache/mapping metadata controls collectives.
+                bool needs_local_index = false;
+                for (int q : qubits)
+                    if ((fresh & (UINT64_C(1) << q)) && perm_l2p[q] < num_qubits_local)
+                        needs_local_index = true;
                 uint64_t mask = 0, value = 0;
                 bool active = true;
                 for (int q = 0; q < num_qubits; ++q)
@@ -2783,7 +2788,7 @@ namespace qcs
                     if (!tiled_workspace)
                         tiled_workspace = std::make_unique<tiled_cdf_detail::workspace>(stream);
                     device_summary = tiled_workspace->build(state_data_device, num_states_local,
-                                                        mask, value, active);
+                                                        mask, value, active, needs_local_index);
                     rank_sampling_detail::tiled_uniform<<<1, 1, 0, stream>>>(
                         const_cast<tiled_cdf_detail::rank_summary*>(device_summary),
                         rng_seed, measurement_counter);
@@ -2816,26 +2821,29 @@ namespace qcs
                     if (threshold < ranks[r].mass) break;
                     threshold -= ranks[r].mass;
                 }
-                double fraction = std::min(double(threshold / ranks[selected].mass),
-                                           std::nextafter(1.0, 0.0));
-                tiled_cdf_detail::sample_result result{UINT64_MAX,
-                                                       tiled_cdf_detail::invalid_distribution};
-                QCS_MEASURE_STAGE("tiled_cdf.gpu_tile_lookup_and_amplitude_sampling");
-                const tiled_cdf_detail::sample_result* device_result = nullptr;
-                if (proc_num == selected) {
-                    try {
-                        device_result = tiled_workspace->draw(fraction);
-                    } catch (...) {
-                        device_result = nullptr;
-                        result = {UINT64_MAX, tiled_cdf_detail::invalid_distribution};
+                uint64_t index = 0;
+                if (needs_local_index) {
+                    double fraction = std::min(double(threshold / ranks[selected].mass),
+                                               std::nextafter(1.0, 0.0));
+                    tiled_cdf_detail::sample_result result{UINT64_MAX,
+                                                           tiled_cdf_detail::invalid_distribution};
+                    QCS_MEASURE_STAGE("tiled_cdf.gpu_tile_lookup_and_amplitude_sampling");
+                    const tiled_cdf_detail::sample_result* device_result = nullptr;
+                    if (proc_num == selected) {
+                        try {
+                            device_result = tiled_workspace->draw(fraction);
+                        } catch (...) {
+                            device_result = nullptr;
+                            result = {UINT64_MAX, tiled_cdf_detail::invalid_distribution};
+                        }
                     }
+                    QCS_MEASURE_STAGE("tiled_cdf.result_broadcast");
+                    measurement_broadcast(&result, sizeof(result), selected, device_result);
+                    if (result.status || result.index >= num_states_local)
+                        throw std::runtime_error("invalid tiled CDF owner sample");
+                    index = result.index;
                 }
-                QCS_MEASURE_STAGE("tiled_cdf.result_broadcast");
-                measurement_broadcast(&result, sizeof(result), selected, device_result);
-                if (result.status || result.index >= num_states_local)
-                    throw std::runtime_error("invalid tiled CDF owner sample");
                 QCS_MEASURE_STAGE("tiled_cdf.metadata_update");
-                uint64_t index = result.index;
                 uint64_t physical = index | (uint64_t(selected) << num_qubits_local);
                 for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {
                     uint64_t b = (physical >> perm_l2p[q]) & 1;
@@ -3026,6 +3034,11 @@ namespace qcs
             uint64_t sampled = measured_value_logical;
             if (fresh)
             {
+                // Only replicated request/cache/mapping metadata controls collectives.
+                bool needs_local_index = false;
+                for (int q : qubits)
+                    if ((fresh & (UINT64_C(1) << q)) && perm_l2p[q] < num_qubits_local)
+                        needs_local_index = true;
                 uint64_t mask = 0, value = 0;
                 bool active = true;
                 for (int q = 0; q < num_qubits; ++q)
@@ -3105,28 +3118,31 @@ namespace qcs
                 };
                 double threshold = std::min(uniform * total, std::nextafter(total, 0.0));
                 int selected = static_cast<int>(select(masses, masses.size(), threshold));
-                uint64_t index = UINT64_MAX;
-                const uint64_t* device_index = nullptr;
-                QCS_MEASURE_STAGE("rank_sampled.owner_local_sampling");
-                if (proc_num == selected) {
-                    // Rank CDF residual is already a conditional local draw.
-                    size_t chunk = select(weights, chunks, threshold);
-                    double fraction = static_cast<double>(threshold / weights[chunk]);
-                    fraction = std::min(fraction, std::nextafter(1.0, 0.0));
-                    auto* index_device = reinterpret_cast<uint64_t*>(device + chunks + 1);
-                    try {
-                        rank_sampling_detail::sample_chunk<<<1, 1, 0, stream>>>(
-                            state_data_device, num_states_local, chunk, mask, value, fraction, index_device);
-                        if (cudaGetLastError() != cudaSuccess)
-                            throw std::runtime_error("rank sampling CUDA launch failed");
-                        device_index = index_device;
-                    } catch (...) {
-                        index = UINT64_MAX;
+                uint64_t index = 0;
+                if (needs_local_index) {
+                    index = UINT64_MAX;
+                    const uint64_t* device_index = nullptr;
+                    QCS_MEASURE_STAGE("rank_sampled.owner_local_sampling");
+                    if (proc_num == selected) {
+                        // Rank CDF residual is already a conditional local draw.
+                        size_t chunk = select(weights, chunks, threshold);
+                        double fraction = static_cast<double>(threshold / weights[chunk]);
+                        fraction = std::min(fraction, std::nextafter(1.0, 0.0));
+                        auto* index_device = reinterpret_cast<uint64_t*>(device + chunks + 1);
+                        try {
+                            rank_sampling_detail::sample_chunk<<<1, 1, 0, stream>>>(
+                                state_data_device, num_states_local, chunk, mask, value, fraction, index_device);
+                            if (cudaGetLastError() != cudaSuccess)
+                                throw std::runtime_error("rank sampling CUDA launch failed");
+                            device_index = index_device;
+                        } catch (...) {
+                            index = UINT64_MAX;
+                        }
                     }
+                    QCS_MEASURE_STAGE("rank_sampled.result_broadcast");
+                    measurement_broadcast(&index, sizeof(index), selected, device_index);
+                    if (index >= num_states_local) throw std::runtime_error("invalid local measurement norm");
                 }
-                QCS_MEASURE_STAGE("rank_sampled.result_broadcast");
-                measurement_broadcast(&index, sizeof(index), selected, device_index);
-                if (index >= num_states_local) throw std::runtime_error("invalid local measurement norm");
                 QCS_MEASURE_STAGE("rank_sampled.metadata_update");
                 uint64_t physical = index | (uint64_t(selected) << num_qubits_local);
                 for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {
