@@ -78,6 +78,44 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
         c.initialize_selected_state();
     }
     if (c.num_procs > 1 && (c.rank_sampled_measurement || c.tiled_cdf_measurement)) {
+        // Vary every cached global prefix and outcome: half the ranks through
+        // a single eligible rank, with rank zero both eligible and excluded.
+        // Reinitialization reuses persistent workspaces between these cases.
+        for (int cached = 1; cached <= c.num_qubits - c.num_qubits_local; ++cached) {
+            for (int outcome = 0; outcome < (1 << cached); ++outcome) {
+                c.initialize_selected_state();
+                uint64_t cached_mask = 0, cached_value = 0;
+                for (int p = 0; p < cached; ++p) {
+                    int q = c.perm_p2l[c.num_qubits_local + p];
+                    cached_mask |= UINT64_C(1) << q;
+                    if ((outcome >> p) & 1) cached_value |= UINT64_C(1) << q;
+                    (((outcome >> p) & 1) ? c.measured_1_qubit_num_logical_list :
+                        c.measured_0_qubit_num_logical_list).push_back(q);
+                }
+                c.measured_mask_logical = cached_mask;
+                c.measured_value_logical = cached_value;
+                c.pending_projection_mask_logical = cached_mask;
+                bool active = (c.proc_num & ((1 << cached) - 1)) == outcome;
+                std::vector<qcs::complex_t> state(c.num_states_local,
+                    qcs::complex_t(active ? 0 : std::numeric_limits<double>::quiet_NaN(), 0));
+                if (active) state[1] = qcs::complex_t(1, 0);
+                ATLC_CHECK_CUDA(cudaMemcpyAsync, c.state_data_device, state.data(),
+                    state.size()*sizeof(state[0]), cudaMemcpyHostToDevice, c.stream);
+                auto cursor = c.measurement_counter;
+                std::vector<bit_t> bits(1, bit_t(7));
+                // Recoverable failure on an excluded rank must still propagate.
+                c.measurement_counter_exhausted = !active && c.proc_num == (outcome == 0 ? 1 : 0);
+                bool rejected = false;
+                try { c.measure_many({c.perm_p2l[0]}, bits); }
+                catch (const std::runtime_error&) { rejected = true; }
+                check(rejected && c.measurement_counter == cursor && bits[0] == 7);
+                c.measurement_counter_exhausted = false;
+                c.measure_many({c.perm_p2l[0]}, bits);
+                check(bits[0] == 1 && c.measurement_counter == cursor + 1);
+                check(c.measured_value_logical == (cached_value | (UINT64_C(1) << c.perm_p2l[0])));
+            }
+        }
+        c.initialize_selected_state();
         auto mapping = c.initial_perm_p2l;
         auto seed = c.rng_seed;
         for (bool reversed : {false, true}) {

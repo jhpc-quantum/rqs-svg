@@ -106,6 +106,9 @@ __global__ void cdf_scan(const double* masses, double* cdf, uint64_t tiles,
         else if (carry == 0) summary->status |= zero_mass;
     }
 }
+__global__ void inactive_summary(rank_summary* summary) {
+    *summary = {0.0, zero_mass, 0.0};
+}
 __device__ double threshold(double fraction, double total) {
     double x = __dmul_rn(fraction, total);
     return x < total ? x : nextafter(total, 0.0);
@@ -239,9 +242,17 @@ public:
         if ((active && count && !state) || (value & ~mask))
             throw std::invalid_argument("tiled CDF invalid state or conditioning");
         QCS_MEASURE_RANGE("tiled_cdf.workspace_reserve");
-        reserve(count);
+        // Validate the addressable count even when no state will be read.
+        bytes_for(count, sizeof(state_type));
+        reserve(active ? count : 0);
         state_ = state; count_ = count; mask_ = mask; value_ = value; active_ = active;
         built_ = false;
+        if (!active) {
+            inactive_summary<<<1, 1, 0, stream_>>>(summary_);
+            check(cudaGetLastError());
+            built_ = build_cdf;
+            return summary_;
+        }
         check(cudaMemsetAsync(summary_, 0, sizeof(rank_summary), stream_));
         uint64_t tiles = tiles_for(count);
         QCS_MEASURE_STAGE("tiled_cdf.tile_reduction");

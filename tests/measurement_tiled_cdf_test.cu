@@ -228,6 +228,12 @@ int main() {
             }
             run(std::vector<State>(4096,State(1e153,0)),0,0,true,td::invalid_total,{0,1});
             run({State(1,0)},0,0,true,0,{-1,2,NAN,INFINITY});
+            // An inactive first build allocates only summary-sized storage;
+            // later active builds must grow and overwrite all stale metadata.
+            td::workspace inactive_first(stream);
+            inactive_first.build(nullptr, 1024 * td::tile_size, 0, 0, false);
+            if (inactive_first.capacity() != 1) throw std::runtime_error("inactive allocation regression");
+            inactive_first.close();
             // No state pointer is needed by an inactive rank.
             ws.build(nullptr,4096,0,0,false);
             ws.close(); td::check(cudaStreamSynchronize(stream));

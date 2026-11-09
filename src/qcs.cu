@@ -1134,6 +1134,13 @@ namespace qcs
                                       (uint64_t(bits.y) >> 11)) * 0x1.0p-53;
         }
 
+        __global__ void inactive_uniform(double* uniform, uint64_t seed, uint64_t counter)
+        {
+            auto bits = measurement_detail::measurement_random(seed, counter);
+            *uniform = double((uint64_t(bits.x) << 21) |
+                              (uint64_t(bits.y) >> 11)) * 0x1.0p-53;
+        }
+
         // One block per contiguous chunk. Storage scales with state size, never
         // with the number of requested outcomes. No state is projected here.
         __global__ void chunk_weights(const complex_t* state, uint64_t count,
@@ -3064,28 +3071,40 @@ namespace qcs
                     measured_0_qubit_num_logical_list.reserve(num_qubits);
                     if (measurement_counter_exhausted)
                         throw std::runtime_error("measurement RNG counter exhausted");
-                    rank_sampling_workspace.reserve(chunks, num_procs);
+                    rank_sampling_workspace.reserve(active ? chunks : 0, num_procs);
                     device = rank_sampling_workspace.device;
-                    QCS_MEASURE_STAGE("rank_sampled.local_mass");
-                    rank_sampling_detail::chunk_weights<<<std::min<size_t>(chunks, 65535), 256, 0, stream>>>(
-                        state_data_device, num_states_local, mask, value, active,
-                        device, device + chunks, rng_seed, measurement_counter);
-                    if (cudaGetLastError() != cudaSuccess)
-                        throw std::runtime_error("rank sampling CUDA launch failed");
-                    QCS_MEASURE_STAGE("rank_sampled.device_to_host_and_wait");
-                    ATLC_CHECK_CUDA(cudaMemcpyAsync, weights.data(), device,
-                                    weights.size() * sizeof(double), cudaMemcpyDeviceToHost, stream);
-                    ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
-                    QCS_MEASURE_STAGE("rank_sampled.host_mass_sum");
-                    mass = 0;
-                    for (size_t i = 0; i < chunks; ++i) {
-                        if (!std::isfinite(weights[i]) || weights[i] < 0) {
-                            mass = -1;
-                            break;
+                    if (!active) {
+                        // Keep the same device RNG arithmetic, including on rank zero.
+                        rank_sampling_detail::inactive_uniform<<<1, 1, 0, stream>>>(
+                            device, rng_seed, measurement_counter);
+                        if (cudaGetLastError() != cudaSuccess)
+                            throw std::runtime_error("rank sampling CUDA launch failed");
+                        ATLC_CHECK_CUDA(cudaMemcpyAsync, &uniform_local, device,
+                                       sizeof(double), cudaMemcpyDeviceToHost, stream);
+                        ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                        mass = 0;
+                    } else {
+                        QCS_MEASURE_STAGE("rank_sampled.local_mass");
+                        rank_sampling_detail::chunk_weights<<<std::min<size_t>(chunks, 65535), 256, 0, stream>>>(
+                            state_data_device, num_states_local, mask, value, active,
+                            device, device + chunks, rng_seed, measurement_counter);
+                        if (cudaGetLastError() != cudaSuccess)
+                            throw std::runtime_error("rank sampling CUDA launch failed");
+                        QCS_MEASURE_STAGE("rank_sampled.device_to_host_and_wait");
+                        ATLC_CHECK_CUDA(cudaMemcpyAsync, weights.data(), device,
+                                        weights.size() * sizeof(double), cudaMemcpyDeviceToHost, stream);
+                        ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+                        QCS_MEASURE_STAGE("rank_sampled.host_mass_sum");
+                        mass = 0;
+                        for (size_t i = 0; i < chunks; ++i) {
+                            if (!std::isfinite(weights[i]) || weights[i] < 0) {
+                                mass = -1;
+                                break;
+                            }
+                            mass += weights[i];
                         }
-                        mass += weights[i];
+                        uniform_local = weights[chunks];
                     }
-                    uniform_local = weights[chunks];
                 } catch (...) { mass = -1; }
                 // Include the authoritative rank-zero draw in the mass exchange:
                 // no separate broadcast or rank-dependent dispatch collective.
