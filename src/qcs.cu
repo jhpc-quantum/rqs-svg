@@ -59,6 +59,7 @@
 #include "work_buffer.cuh"
 #include "swap_launch.hpp"
 #include "exchange_schedule.hpp"
+#include "gate_parameters.hpp"
 
 namespace qcs
 {
@@ -137,69 +138,6 @@ namespace qcs
     __constant__ qcs::kernel_common_struct kernel_common_constant;
     __device__ qcs::kernel_common_struct kernel_common_global;
 
-    struct kernel_input_qnlist_struct
-    {
-        int num_target_qubits;
-        int num_negative_control_qubits;
-        int num_positive_control_qubits;
-        uint64_t is_measured_bits;
-        uint64_t measured_value_bits;
-        int qubit_num_list[1];
-
-        static constexpr __host__ __device__ uint64_t needed_size(
-            int const num_target_qubits,
-            int const num_negative_control_qubits,
-            int const num_positive_control_qubits)
-        {
-            return sizeof(qcs::kernel_input_qnlist_struct) - sizeof(qubit_num_list) + sizeof(int) * (2 * num_positive_control_qubits + num_negative_control_qubits + 2 * num_target_qubits);
-        }
-
-        __host__ __device__ uint64_t byte_size() const
-        {
-            return needed_size(this->num_target_qubits, this->num_negative_control_qubits, this->num_positive_control_qubits);
-        }
-
-        __host__ __device__ int get_num_operand_qubits() const
-        {
-            return this->num_positive_control_qubits + this->num_negative_control_qubits + this->num_target_qubits;
-        }
-
-        __host__ __device__ int const *get_operand_qubit_num_list_sorted() const
-        {
-            return this->qubit_num_list;
-        }
-
-        __host__ __device__ int *get_operand_qubit_num_list_sorted()
-        {
-            return this->qubit_num_list;
-        }
-
-        __host__ __device__ int const *get_positive_control_qubit_num_list() const
-        {
-            return this->qubit_num_list + this->get_num_operand_qubits();
-        }
-
-        __host__ __device__ int *get_positive_control_qubit_num_list()
-        {
-            return this->qubit_num_list + this->get_num_operand_qubits();
-        }
-
-        __host__ __device__ int const *get_target_qubit_num_list() const
-        {
-            return this->qubit_num_list + 2 * this->num_positive_control_qubits + this->num_negative_control_qubits + this->num_target_qubits;
-        }
-
-        __host__ __device__ int *get_target_qubit_num_list()
-        {
-            return this->qubit_num_list + 2 * this->num_positive_control_qubits + this->num_negative_control_qubits + this->num_target_qubits;
-        }
-    }; /* kernel_input_qnlist_struct */
-
-    constexpr int max_num_qubits_local = 34;
-    constexpr uint64_t kernel_input_max_size = qcs::kernel_input_qnlist_struct::needed_size(qcs::max_num_qubits_local, 0, 0);
-    alignas(kernel_input_qnlist_struct) __constant__ unsigned char kernel_input_constant[qcs::kernel_input_max_size];
-    alignas(kernel_input_qnlist_struct) __device__ unsigned char kernel_input_global[qcs::kernel_input_max_size];
-
     // The host resolves the corresponding symbol with the same selector below.
     __device__ inline qcs::complex_t const *zero_data()
     {
@@ -217,22 +155,12 @@ namespace qcs
             return kernel_common_constant;
     }
 
-    __device__ inline qcs::kernel_input_qnlist_struct const *kernel_input_data()
+    static __device__ void thread_num_to_state_index_q0(uint64_t thread_num, uint64_t &index_state, kernel_input_qnlist_struct const &args)
     {
-        if constexpr (use_global_memory_for_constants)
-            return reinterpret_cast<qcs::kernel_input_qnlist_struct const *>(kernel_input_global);
-        else
-            return reinterpret_cast<qcs::kernel_input_qnlist_struct const *>(kernel_input_constant);
-    }
-
-    static __device__ void thread_num_to_state_index_q0(uint64_t thread_num, uint64_t &index_state)
-    {
-        auto args = kernel_input_data();
-
         index_state = 0;
 
-        int const num_operand_qubits = args->get_num_operand_qubits();
-        int const *const qubit_num_list_sorted = args->get_operand_qubit_num_list_sorted();
+        int const num_operand_qubits = args.get_num_operand_qubits();
+        int const *const qubit_num_list_sorted = args.get_operand_qubit_num_list_sorted();
 
         // generate index_state
         // ignoring positive control qubits
@@ -248,8 +176,8 @@ namespace qcs
 
         // update index_state
         // considering positive control qubits
-        int const *const positive_control_qubit_num_list = args->get_positive_control_qubit_num_list();
-        for (int i = 0; i < args->num_positive_control_qubits; i++)
+        int const *const positive_control_qubit_num_list = args.get_positive_control_qubit_num_list();
+        for (int i = 0; i < args.num_positive_control_qubits; i++)
         {
             index_state |= UINT64_C(1) << positive_control_qubit_num_list[i];
         }
@@ -280,21 +208,20 @@ namespace qcs
     static __device__ void thread_num_to_state_index(
         uint64_t thread_num,
         uint64_t *index_state,
-        int &is_measured_bits, int &measured_value_bits)
+        int &is_measured_bits, int &measured_value_bits, kernel_input_qnlist_struct const &args)
     {
         static_assert(num_target_qubits >= 1,
                       "num_target_qubits must be at least 1");
 
-        thread_num_to_state_index_q0(thread_num, index_state[0]);
+        thread_num_to_state_index_q0(thread_num, index_state[0], args);
 
-        auto args = kernel_input_data();
-        int const *const target_qubit_num_list = args->get_target_qubit_num_list();
+        int const *const target_qubit_num_list = args.get_target_qubit_num_list();
 
         // Add target bits in ascending basis-index order, with target 0 as LSB.
         add_target_qubit_indices<num_target_qubits>(index_state, target_qubit_num_list);
 
-        is_measured_bits = args->is_measured_bits;
-        measured_value_bits = args->measured_value_bits;
+        is_measured_bits = args.is_measured_bits;
+        measured_value_bits = args.measured_value_bits;
 
     } /* thread_num_to_state_index */
 
@@ -951,19 +878,18 @@ namespace qcs
         }
     }
 
-    __global__ void cuda_swap(uint64_t num_threads, uint64_t ordinal_offset)
+    __global__ void cuda_swap(uint64_t num_threads, uint64_t ordinal_offset, kernel_input_qnlist_struct const args)
     {
         uint64_t ordinal = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
         if (ordinal >= num_threads) return;
         ordinal += ordinal_offset;
-        auto const *const args = kernel_input_data();
-        int const num_targets = args->num_target_qubits;
-        int const *const targets = args->get_target_qubit_num_list();
+        int const num_targets = args.num_target_qubits;
+        int const *const targets = args.get_target_qubit_num_list();
         qcs::complex_t *const state = kernel_common_data().state_data_device;
         // High ordinal bits enumerate non-operand qubits; controls are fixed
         // by the shared index helper. Low bits enumerate the target states.
         uint64_t index;
-        thread_num_to_state_index_q0(ordinal >> num_targets, index);
+        thread_num_to_state_index_q0(ordinal >> num_targets, index, args);
         uint64_t partner = index;
         #pragma unroll 1
         for (int t = 0; t < num_targets; t += 2)
@@ -985,8 +911,10 @@ namespace qcs
     }
 
     template <typename GateType, int num_target_qubits = GateType::num_target_qubits>
-    __global__ void cuda_gate(GateType const gateobj)
+    __global__ void cuda_gate(GateType const gateobj, kernel_input_qnlist_struct const args)
     {
+        static_assert(sizeof(GateType) + sizeof(kernel_input_qnlist_struct) + alignof(kernel_input_qnlist_struct) <= 4096,
+                      "Gate parameters exceed the CUDA kernel parameter limit");
         static_assert(num_target_qubits == GateType::num_target_qubits,
                       "num_target_qubits must match the gate");
         constexpr int num_basis_indices = 1 << num_target_qubits;
@@ -995,11 +923,11 @@ namespace qcs
         int is_measured_bits = 0, measured_value_bits = 0;
         if constexpr (num_target_qubits == 0)
         {
-            thread_num_to_state_index_q0(thread_num, index_state[0]);
+            thread_num_to_state_index_q0(thread_num, index_state[0], args);
         }
         else
         {
-            thread_num_to_state_index<num_target_qubits>(thread_num, index_state, is_measured_bits, measured_value_bits);
+            thread_num_to_state_index<num_target_qubits>(thread_num, index_state, is_measured_bits, measured_value_bits, args);
         }
 
         qcs::complex_t *const state = kernel_common_data().state_data_device;
@@ -1316,8 +1244,7 @@ namespace qcs
         qcs::complex_t *zero_constant_addr;
         qcs::kernel_common_struct *qcs_kernel_common_constant_addr;
         qcs::kernel_common_struct qcs_kernel_common_host;
-        qcs::kernel_input_qnlist_struct *qcs_kernel_input_constant_addr;
-        std::vector<char> qcs_kernel_input_host_buffer;
+        qcs::kernel_input_qnlist_struct gate_parameters{};
         qcs::work_buffer scratch;
         int log_swap_buffer_total_length;
         uint64_t swap_buffer_total_length;
@@ -1520,13 +1447,11 @@ namespace qcs
             if constexpr (use_global_memory_for_constants)
             {
                 ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_common_constant_addr, qcs::kernel_common_global);
-                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_input_constant_addr, qcs::kernel_input_global);
                 ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&zero_constant_addr, qcs::zero_global);
             }
             else
             {
                 ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_common_constant_addr, qcs::kernel_common_constant);
-                ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&qcs_kernel_input_constant_addr, qcs::kernel_input_constant);
                 ATLC_CHECK_CUDA(cudaGetSymbolAddress, (void **)&zero_constant_addr, qcs::zero_constant);
             }
 
@@ -2331,12 +2256,16 @@ namespace qcs
                 return;
             }
 
-            uint64_t const qkiqn_size = qcs::kernel_input_qnlist_struct::needed_size(
-                target_qubit_num_physical_list.size(),
-                negative_control_qubit_num_physical_local_list.size(),
-                positive_control_qubit_num_physical_local_list.size());
-            qcs_kernel_input_host_buffer.resize(qkiqn_size);
-            qcs::kernel_input_qnlist_struct *const qcs_kernel_input_host = (qcs::kernel_input_qnlist_struct *)qcs_kernel_input_host_buffer.data();
+            auto const targets = target_qubit_num_physical_list.size();
+            auto const negative = negative_control_qubit_num_physical_local_list.size();
+            auto const positive = positive_control_qubit_num_physical_local_list.size();
+            if (targets > max_num_qubits_local || negative > max_num_qubits_local ||
+                positive > max_num_qubits_local ||
+                !kernel_input_qnlist_struct::valid_counts(targets, negative, positive) ||
+                targets + negative + positive > static_cast<size_t>(num_qubits_local))
+                throw std::runtime_error("Gate operand count exceeds the supported local-qubit limit");
+            gate_parameters = {};
+            auto *const qcs_kernel_input_host = &gate_parameters;
 
             qcs_kernel_input_host->num_positive_control_qubits = positive_control_qubit_num_physical_local_list.size();
             qcs_kernel_input_host->num_negative_control_qubits = negative_control_qubit_num_physical_local_list.size();
@@ -2375,8 +2304,6 @@ namespace qcs
             {
                 qubit_num_list_sorted_kernel_arg[qni] = operand_qubit_num_list[qni];
             }
-
-            ATLC_CHECK_CUDA(cudaMemcpyAsync, qcs_kernel_input_constant_addr, qcs_kernel_input_host, qkiqn_size, cudaMemcpyHostToDevice, stream);
 
             uint64_t const log_num_threads = num_qubits_local - num_operand_qubits;
 
@@ -3276,7 +3203,7 @@ namespace qcs
 
             if (proc_num_control_condition)
             {
-                ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj);
+                ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj, gate_parameters);
             }
             finish_gate_operation(release_mask);
         }
@@ -3301,7 +3228,7 @@ namespace qcs
                 {
                     auto const launch = swap_launch_config.next(num_threads, offset);
                     ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_swap, launch.blocks, launch.threads,
-                        0, stream, launch.count, launch.offset);
+                        0, stream, launch.count, launch.offset, gate_parameters);
                     offset += launch.count;
                 }
             }

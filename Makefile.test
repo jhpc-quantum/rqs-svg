@@ -312,3 +312,17 @@ test-exchange: exchange-harness
 	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_HARNESS))
 	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_SERIAL_HARNESS))
 TEST_BINARIES += $(EXCHANGE_HARNESS) $(EXCHANGE_SERIAL_HARNESS) $(EXCHANGE_SERIAL_SOURCE)
+
+GATE_PARAMETERS_TEST ?= bin/gate_parameters_test
+$(GATE_PARAMETERS_TEST): tests/gate_parameters_test.cpp src/gate_parameters.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+.PHONY: test-gate-parameters
+test-gate-parameters: $(GATE_PARAMETERS_TEST)
+	$(GATE_PARAMETERS_TEST)
+TEST_BINARIES += $(GATE_PARAMETERS_TEST)
+
+# All direct and copied-source consumers use the fixed gate argument layout.
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/gate_parameters.hpp
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/gate_parameters.hpp
+$(EXCHANGE_SERIAL_SOURCE): src/gate_parameters.hpp
