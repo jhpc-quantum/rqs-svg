@@ -2689,14 +2689,17 @@ namespace qcs
                         const_cast<tiled_cdf_detail::rank_summary*>(device_summary),
                         rng_seed, measurement_counter);
                     tiled_cdf_detail::check(cudaGetLastError());
+                    QCS_MEASURE_STAGE("tiled_cdf.scalar_readback_and_wait");
                     tiled_cdf_detail::check(cudaMemcpyAsync(&summary, device_summary,
                         sizeof(summary), cudaMemcpyDeviceToHost, stream));
                     tiled_cdf_detail::check(cudaStreamSynchronize(stream));
                 } catch (...) {
                     summary.status = tiled_cdf_detail::invalid_distribution;
                 }
+                QCS_MEASURE_STAGE("tiled_cdf.rank_exchange");
                 ATLC_CHECK_MPI(MPI_Allgather, &summary, int(sizeof(summary)), MPI_BYTE,
                                ranks.data(), int(sizeof(summary)), MPI_BYTE, MPI_COMM_WORLD);
+                QCS_MEASURE_STAGE("tiled_cdf.rank_selection");
                 long double total = 0;
                 for (const auto& r : ranks) {
                     if ((r.status & ~unsigned(tiled_cdf_detail::zero_mass)) ||
@@ -2722,9 +2725,11 @@ namespace qcs
                                            std::nextafter(1.0, 0.0));
                 tiled_cdf_detail::sample_result result{UINT64_MAX,
                                                        tiled_cdf_detail::invalid_distribution};
+                QCS_MEASURE_STAGE("tiled_cdf.gpu_tile_lookup_and_amplitude_sampling");
                 if (proc_num == selected) {
                     try {
                         const auto* device_result = tiled_workspace->draw(fraction);
+                        QCS_MEASURE_STAGE("tiled_cdf.owner_readback_and_wait");
                         tiled_cdf_detail::check(cudaMemcpyAsync(&result, device_result,
                             sizeof(result), cudaMemcpyDeviceToHost, stream));
                         tiled_cdf_detail::check(cudaStreamSynchronize(stream));
@@ -2732,10 +2737,12 @@ namespace qcs
                         result = {UINT64_MAX, tiled_cdf_detail::invalid_distribution};
                     }
                 }
+                QCS_MEASURE_STAGE("tiled_cdf.result_broadcast");
                 ATLC_CHECK_MPI(MPI_Bcast, &result, int(sizeof(result)), MPI_BYTE,
                                selected, MPI_COMM_WORLD);
                 if (result.status || result.index >= num_states_local)
                     throw std::runtime_error("invalid tiled CDF owner sample");
+                QCS_MEASURE_STAGE("tiled_cdf.metadata_update");
                 uint64_t index = result.index;
                 uint64_t physical = index | (uint64_t(selected) << num_qubits_local);
                 for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {

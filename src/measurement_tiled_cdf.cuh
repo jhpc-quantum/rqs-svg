@@ -1,4 +1,5 @@
 #pragma once
+#include "measurement_profile.hpp"
 #include <cuda_runtime.h>
 #include <cuda/std/complex>
 #include <algorithm>
@@ -207,16 +208,19 @@ public:
         owner();
         if ((active && count && !state) || (value & ~mask))
             throw std::invalid_argument("tiled CDF invalid state or conditioning");
+        QCS_MEASURE_RANGE("tiled_cdf.workspace_reserve");
         reserve(count);
         state_ = state; count_ = count; mask_ = mask; value_ = value; active_ = active;
         built_ = false;
         check(cudaMemsetAsync(summary_, 0, sizeof(rank_summary), stream_));
         uint64_t tiles = tiles_for(count);
+        QCS_MEASURE_STAGE("tiled_cdf.tile_reduction");
         if (tiles) {
             masses<<<unsigned(std::min<uint64_t>(tiles, 65535)), threads, 0, stream_>>>(
                 state, count, mask, value, active, masses_, summary_);
             check(cudaGetLastError());
         }
+        QCS_MEASURE_STAGE("tiled_cdf.device_cdf_construction");
         cdf_scan<<<1, threads, 0, stream_>>>(masses_, cdf_, tiles, summary_);
         check(cudaGetLastError()); built_ = true;
         return summary_;

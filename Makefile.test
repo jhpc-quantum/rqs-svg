@@ -230,7 +230,7 @@ $(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST): src/me
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_backend.hpp
 
 TILED_CDF_TEST ?= bin/measurement_tiled_cdf_test
-$(TILED_CDF_TEST): tests/measurement_tiled_cdf_test.cu src/measurement_tiled_cdf.cuh
+$(TILED_CDF_TEST): tests/measurement_tiled_cdf_test.cu src/measurement_tiled_cdf.cuh src/measurement_profile.hpp
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(LDFLAGS_VENDOR) --cudart=shared
 
@@ -247,3 +247,10 @@ $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_tiled_cdf.cuh
 .PHONY: test-measurement-tiled-integration
 test-measurement-tiled-integration: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
 	QCS_MEASUREMENT_BACKEND=tiled_cdf $(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+
+TEST_BINARIES += $(MEASUREMENT_BACKEND_BENCHMARK) $(MEASUREMENT_BACKEND_PROFILE)
+BENCH_BACKENDS ?= grouped rank_sampled tiled_cdf auto
+BENCH_OUTPUT ?= results/measurement
+.PHONY: benchmark-measurement-backends
+benchmark-measurement-backends: $(MEASUREMENT_BACKEND_BENCHMARK)
+	python3 scripts/benchmark_measurement.py --no-build --binary $(MEASUREMENT_BACKEND_BENCHMARK) --output $(BENCH_OUTPUT) --ranks $(RANKS) --qubits $(BENCH_QUBITS) --warmups $(BENCH_WARMUPS) --repetitions $(BENCH_REPETITIONS) --backends $(BENCH_BACKENDS) --mpiexec '$(MPIEXEC)'
