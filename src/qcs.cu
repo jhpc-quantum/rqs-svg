@@ -58,6 +58,7 @@
 #include "pauli_reduce.cuh"
 #include "work_buffer.cuh"
 #include "swap_launch.hpp"
+#include "exchange_schedule.hpp"
 
 namespace qcs
 {
@@ -2175,99 +2176,71 @@ namespace qcs
                 swap_buffer_length = local_buf_length;
             }
 
-            // generate a mask for generating global_nonswap_self
-            uint64_t global_swap_self_mask = 0;
-            for (int target_num = 0; target_num < num_swap_qubits; target_num++)
-            {
-                // a_delta = a – n_local
-                int const swap_target_global_delta = swap_target_global_list[target_num] - num_qubits_local;
-                global_swap_self_mask |= (UINT64_C(1) << swap_target_global_delta);
-            }
-
-            // global_nonswap_self = make proc_num_self's a_delta_i-th digit zero
-            uint64_t const global_nonswap_self = proc_num & ~global_swap_self_mask;
-
-            // 1<<(num_local_qubits - b_min)
-            uint64_t const num_local_areas = UINT64_C(1) << (num_qubits_local - swap_target_local_min);
+            exchange_detail::schedule const traversal(num_qubits_local,
+                swap_target_local_list, swap_target_global_list);
+            // Slot lifetimes span every region and XOR phase.
             bool slot_used[2] = {false, false};
             int next_slot = 0;
             int last_slot = -1;
-            for (uint64_t local_num_self = 0; local_num_self < num_local_areas; local_num_self++)
+            // All ranks use the same ascending nonzero XOR submasks.
+            for (uint64_t delta = traversal.next(0); delta; delta = traversal.next(delta))
             {
-
-                // global_swap_peer = OR_i (the b_delta_i-th bit of local_num_self) placed at the a_delta_i-th bit
-                uint64_t global_swap_peer = 0;
-                for (int target_num = 0; target_num < num_swap_qubits; target_num++)
+                uint64_t const proc_num_peer = uint64_t(proc_num) ^ delta;
+                uint64_t const fixed = traversal.fixed_value(proc_num_peer);
+                for (uint64_t ordinal = 0; ordinal < traversal.regions; ++ordinal)
                 {
-                    // a_delta_i
-                    int const swap_target_global_delta = swap_target_global_list[target_num] - num_qubits_local;
-                    // b_delta_i
-                    int const swap_target_local_delta = swap_target_local_list[target_num] - swap_target_local_min;
-                    global_swap_peer |=
-                        // The b_delta_i-th bit of local_num_self
-                        ((local_num_self >> swap_target_local_delta) & 1)
-                        // Place it at the a_delta_i-th bit
-                        << swap_target_global_delta;
-                }
-
-                uint64_t const proc_num_peer = global_swap_peer | global_nonswap_self;
-
-                // send & recv
-                if (proc_num_peer == proc_num)
-                {
-                    continue;
-                }
-
-                bool is_peer_greater = proc_num_peer > proc_num;
-                for (uint64_t buffer_pos = 0; buffer_pos < local_buf_length; )
-                {
-                    uint64_t const chunk_length = std::min(swap_buffer_length, local_buf_length - buffer_pos);
-                    int const slot = use_pipeline ? next_slot : 0;
-                    qcs::complex_t *const receive_buffer = swap_buffer + slot * slot_capacity;
-                    qcs::complex_t *const state_region = &state_data_device[local_num_self * local_buf_length + buffer_pos];
-                    if constexpr (exchange_pipeline_copy_back)
+                    uint64_t const local_num_self = traversal.area(fixed, ordinal);
+                    bool is_peer_greater = proc_num_peer > proc_num;
+                    for (uint64_t buffer_pos = 0; buffer_pos < local_buf_length; )
                     {
-                        if (use_pipeline && slot_used[slot])
+                        uint64_t const chunk_length = std::min(swap_buffer_length, local_buf_length - buffer_pos);
+                        int const slot = use_pipeline ? next_slot : 0;
+                        qcs::complex_t *const receive_buffer = swap_buffer + slot * slot_capacity;
+                        qcs::complex_t *const state_region = &state_data_device[local_num_self * local_buf_length + buffer_pos];
+                        if constexpr (exchange_pipeline_copy_back)
                         {
-                            ATLC_CHECK_CUDA(cudaStreamWaitEvent, stream, exchange_copy_done[slot], 0);
+                            if (use_pipeline && slot_used[slot])
+                            {
+                                ATLC_CHECK_CUDA(cudaStreamWaitEvent, stream, exchange_copy_done[slot], 0);
+                            }
                         }
-                    }
-                    ATLC_CHECK_NCCL(ncclGroupStart);
-                    for (int send_recv = 0; send_recv < 2; send_recv++)
-                    {
-                        if (send_recv ^ is_peer_greater)
+                        ATLC_CHECK_NCCL(ncclGroupStart);
+                        for (int send_recv = 0; send_recv < 2; send_recv++)
                         {
-                            ATLC_CHECK_NCCL(ncclSend, state_region, chunk_length * 2 /* complex */, ncclDouble, proc_num_peer, nccl_comm, stream);
+                            if (send_recv ^ is_peer_greater)
+                            {
+                                ATLC_CHECK_NCCL(ncclSend, state_region, chunk_length * 2 /* complex */, ncclDouble, proc_num_peer, nccl_comm, stream);
+                            }
+                            else
+                            {
+                                ATLC_CHECK_NCCL(ncclRecv, receive_buffer, chunk_length * 2 /* complex */, ncclDouble, proc_num_peer, nccl_comm, stream);
+                            }
                         }
-                        else
+                        ATLC_CHECK_NCCL(ncclGroupEnd);
+                        if constexpr (exchange_pipeline_copy_back)
                         {
-                            ATLC_CHECK_NCCL(ncclRecv, receive_buffer, chunk_length * 2 /* complex */, ncclDouble, proc_num_peer, nccl_comm, stream);
-                        }
-                    }
-                    ATLC_CHECK_NCCL(ncclGroupEnd);
-                    if constexpr (exchange_pipeline_copy_back)
-                    {
-                        if (use_pipeline)
-                        {
-                            // Both the send and receive must finish before overwriting the state region.
-                            ATLC_CHECK_CUDA(cudaEventRecord, exchange_transfer_done[slot], stream);
-                            ATLC_CHECK_CUDA(cudaStreamWaitEvent, exchange_copy_stream, exchange_transfer_done[slot], 0);
-                            ATLC_CHECK_CUDA(cudaMemcpyAsync, state_region, receive_buffer, chunk_length * sizeof(qcs::complex_t), cudaMemcpyDeviceToDevice, exchange_copy_stream);
-                            ATLC_CHECK_CUDA(cudaEventRecord, exchange_copy_done[slot], exchange_copy_stream);
-                            slot_used[slot] = true;
-                            last_slot = slot;
-                            next_slot = 1 - slot;
+                            if (use_pipeline)
+                            {
+                                // Both the send and receive must finish before overwriting the state region.
+                                ATLC_CHECK_CUDA(cudaEventRecord, exchange_transfer_done[slot], stream);
+                                ATLC_CHECK_CUDA(cudaStreamWaitEvent, exchange_copy_stream, exchange_transfer_done[slot], 0);
+                                ATLC_CHECK_CUDA(cudaMemcpyAsync, state_region, receive_buffer, chunk_length * sizeof(qcs::complex_t), cudaMemcpyDeviceToDevice, exchange_copy_stream);
+                                ATLC_CHECK_CUDA(cudaEventRecord, exchange_copy_done[slot], exchange_copy_stream);
+                                slot_used[slot] = true;
+                                last_slot = slot;
+                                next_slot = 1 - slot;
+                            }
+                            else
+                            {
+                                ATLC_CHECK_CUDA(cudaMemcpyAsync, state_region, receive_buffer, chunk_length * sizeof(qcs::complex_t), cudaMemcpyDeviceToDevice, stream);
+                            }
                         }
                         else
                         {
                             ATLC_CHECK_CUDA(cudaMemcpyAsync, state_region, receive_buffer, chunk_length * sizeof(qcs::complex_t), cudaMemcpyDeviceToDevice, stream);
                         }
+                        buffer_pos += chunk_length;
                     }
-                    else
-                    {
-                        ATLC_CHECK_CUDA(cudaMemcpyAsync, state_region, receive_buffer, chunk_length * sizeof(qcs::complex_t), cudaMemcpyDeviceToDevice, stream);
-                    }
-                    buffer_pos += chunk_length;
                 }
             }
             if constexpr (exchange_pipeline_copy_back && !exchange_nvshmem_registered_put)

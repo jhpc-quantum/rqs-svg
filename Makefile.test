@@ -280,3 +280,35 @@ test-measurement-race-nccl-integration: $(MEASUREMENT_HARNESS_DIR)/measurement_i
 TEST_BINARIES += $(MEASUREMENT_RACE_DEVICE_TEST)
 $(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/measurement_race_nccl.cuh
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_race_nccl.cuh
+
+EXCHANGE_SCHEDULE_TEST ?= bin/exchange_schedule_test
+$(EXCHANGE_SCHEDULE_TEST): tests/exchange_schedule_test.cpp src/exchange_schedule.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+.PHONY: test-exchange-schedule
+test-exchange-schedule: $(EXCHANGE_SCHEDULE_TEST)
+	$(EXCHANGE_SCHEDULE_TEST)
+TEST_BINARIES += $(EXCHANGE_SCHEDULE_TEST)
+
+# All direct and copied-source consumers include the scheduling helper.
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/exchange_schedule.hpp
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/exchange_schedule.hpp
+
+EXCHANGE_HARNESS ?= bin/exchange_harness
+EXCHANGE_SERIAL_SOURCE ?= bin/exchange-serial/qcs.cu
+EXCHANGE_SERIAL_HARNESS ?= bin/exchange_serial_harness
+EXCHANGE_HARNESS_DEPS = tests/exchange_harness.cu src/qcs.cu $(wildcard src/*.hpp src/*.cuh) include/qcs.h
+$(EXCHANGE_HARNESS): $(EXCHANGE_HARNESS_DEPS)
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+$(EXCHANGE_SERIAL_SOURCE): src/qcs.cu scripts/prepare_exchange_harness.py
+	python3 scripts/prepare_exchange_harness.py --source $< --output $@
+$(EXCHANGE_SERIAL_HARNESS): $(EXCHANGE_HARNESS_DEPS) $(EXCHANGE_SERIAL_SOURCE)
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) -I$(abspath src) -DQCS_EXCHANGE_SOURCE='"$(abspath $(EXCHANGE_SERIAL_SOURCE))"' $< -o $@ $(NVCC_LDFLAGS)
+.PHONY: exchange-harness test-exchange
+exchange-harness: $(EXCHANGE_HARNESS) $(EXCHANGE_SERIAL_HARNESS)
+test-exchange: exchange-harness
+	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_HARNESS))
+	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_SERIAL_HARNESS))
+TEST_BINARIES += $(EXCHANGE_HARNESS) $(EXCHANGE_SERIAL_HARNESS) $(EXCHANGE_SERIAL_SOURCE)
