@@ -1,6 +1,7 @@
 #include "../src/measurement_reduce.cuh"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -203,6 +204,65 @@ void shrinking_groups(md::workspace& workspace, device_state& input)
     compare(workspace, input, state, d, false); // one remaining active element
 }
 
+// Check dispatch itself as well as values: capture after reserve so allocation
+// and resource discovery are outside capture. Never execute the captured graph.
+template<int N>
+void single_block_dispatch(md::workspace& workspace, device_state& input)
+{
+    auto state = nonuniform(4096);
+    input.upload(state);
+    auto config = workspace.reserve<N>(input.stream);
+    ATLC_CHECK_CUDA(cudaStreamSynchronize, input.stream);
+    // Noncontiguous physical targets, reversed outcome positions, fixed bits,
+    // and prior controls of both polarities. Sweep across the one-block edge.
+    for (int local = 0; local <= N; ++local)
+    for (unsigned active_bits = static_cast<unsigned>(local); active_bits <= 10; ++active_bits)
+    {
+        const int order[] = {9, 2, 7, 0, 11, 4, 1, 10, 3, 8, 5, 6};
+        md::descriptor<N> d;
+        d.local_targets = local;
+        d.fixed_outcome = ((UINT64_C(1) << N) - 1) &
+                          ~(((UINT64_C(1) << local) - 1) << (N - local));
+        for (int j = 0; j < local; ++j)
+        {
+            d.local_target_physical[j] = order[j];
+            d.local_outcome_bits[j] = N - 1 - j;
+        }
+        for (unsigned j = active_bits; j < 12; ++j)
+        {
+            d.control_mask |= UINT64_C(1) << order[j];
+            if (j % 2) d.control_value |= UINT64_C(1) << order[j];
+        }
+        auto packed = md::pack(d, state.size());
+        unsigned blocks = md::measurement_blocks(packed.active_count, config.blocks);
+        cudaGraph_t graph = nullptr;
+        ATLC_CHECK_CUDA(cudaStreamBeginCapture, input.stream, cudaStreamCaptureModeThreadLocal);
+        auto* output = workspace.enqueue(input.data, state.size(), d, input.stream);
+        ATLC_CHECK_CUDA(cudaStreamEndCapture, input.stream, &graph);
+        size_t nodes = 0;
+        ATLC_CHECK_CUDA(cudaGraphGetNodes, graph, nullptr, &nodes);
+        ATLC_CHECK_CUDA(cudaGraphDestroy, graph);
+        require(nodes == (blocks == 1 ? 1u : 2u), "unexpected reduction launch count");
+        require(output == workspace.data() + (UINT64_C(1) << N) * config.blocks,
+                "registered output offset changed");
+        auto actual = compare(workspace, input, state, d);
+        // Explicit pre-optimization path, including poisoned output storage.
+        ATLC_CHECK_CUDA(cudaMemsetAsync, workspace.data(), 0xff,
+                       workspace.capacity() * sizeof(double), input.stream);
+        md::first_stage<N><<<blocks, md::block_size, config.dynamic_shared, input.stream>>>(
+            input.data, packed, workspace.data());
+        ATLC_CHECK_CUDA(cudaGetLastError);
+        md::second_stage<N><<<(1u << N), md::block_size, 0, input.stream>>>(
+            workspace.data(), output, blocks);
+        ATLC_CHECK_CUDA(cudaGetLastError);
+        std::array<double, (1 << N)> baseline{};
+        ATLC_CHECK_CUDA(cudaMemcpyAsync, baseline.data(), output, sizeof(baseline),
+                       cudaMemcpyDeviceToHost, input.stream);
+        ATLC_CHECK_CUDA(cudaStreamSynchronize, input.stream);
+        require(actual == baseline, "optimized/baseline bins differ");
+    }
+}
+
 void analytic_order(md::workspace& workspace, device_state& input)
 {
     std::vector<State> state(8);
@@ -292,10 +352,88 @@ void host_index_checks()
     rejects([&] { md::pack(bad, UINT64_C(1) << 40); });
 }
 
-int main()
+// Optional paired microbenchmark. GPU batch timing includes launch gaps; host
+// timing includes one stream completion per reducer API call, not NCCL/sampling.
+template<int N>
+void benchmark(cudaStream_t stream)
+{
+    md::workspace workspace(stream);
+    device_state input(stream);
+    auto config = workspace.reserve<N>(stream);
+    for (size_t count : {size_t(1), size_t(16), size_t(256), size_t(512), size_t(1) << 20})
+    {
+        auto state = nonuniform(count);
+        input.upload(state);
+        md::descriptor<N> d;
+        d.fixed_outcome = (1u << N) - 1;
+        auto packed = md::pack(d, count);
+        unsigned blocks = md::measurement_blocks(packed.active_count, config.blocks);
+        double* output = workspace.data() + (UINT64_C(1) << N) * config.blocks;
+        auto launch = [&](bool optimized) {
+            if (optimized) workspace.enqueue(input.data, count, d, stream);
+            else
+            {
+                // Match enqueue's host metadata and workspace checks too.
+                auto baseline_packed = md::pack(d, count);
+                auto baseline_config = workspace.reserve<N>(stream);
+                unsigned baseline_blocks = md::measurement_blocks(
+                    baseline_packed.active_count, baseline_config.blocks);
+                md::first_stage<N><<<baseline_blocks, md::block_size, baseline_config.dynamic_shared, stream>>>(
+                    input.data, baseline_packed, workspace.data());
+                ATLC_CHECK_CUDA(cudaGetLastError);
+                md::second_stage<N><<<(1u << N), md::block_size, 0, stream>>>(
+                    workspace.data(), output, baseline_blocks);
+                ATLC_CHECK_CUDA(cudaGetLastError);
+            }
+        };
+        cudaEvent_t start, stop;
+        ATLC_CHECK_CUDA(cudaEventCreate, &start);
+        ATLC_CHECK_CUDA(cudaEventCreate, &stop);
+        for (bool optimized : {false, true})
+        {
+            for (int i = 0; i < 20; ++i) launch(optimized);
+            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            constexpr int repeats = 200;
+            ATLC_CHECK_CUDA(cudaEventRecord, start, stream);
+            for (int i = 0; i < repeats; ++i) launch(optimized);
+            ATLC_CHECK_CUDA(cudaEventRecord, stop, stream);
+            ATLC_CHECK_CUDA(cudaEventSynchronize, stop);
+            float milliseconds = 0;
+            ATLC_CHECK_CUDA(cudaEventElapsedTime, &milliseconds, start, stop);
+            auto begin = std::chrono::steady_clock::now();
+            for (int i = 0; i < repeats; ++i)
+            {
+                launch(optimized);
+                ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            }
+            double host_us = std::chrono::duration<double, std::micro>(
+                std::chrono::steady_clock::now() - begin).count() / repeats;
+            std::cout << N << ',' << count << ',' << blocks << ',' << optimized
+                      << ',' << milliseconds * 1000 / repeats << ',' << host_us << '\n';
+        }
+        ATLC_CHECK_CUDA(cudaEventDestroy, start);
+        ATLC_CHECK_CUDA(cudaEventDestroy, stop);
+    }
+    workspace.close();
+}
+
+int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 2 && std::string(argv[1]) == "--benchmark")
+        {
+            cudaStream_t stream;
+            ATLC_CHECK_CUDA(cudaStreamCreateWithFlags, &stream, cudaStreamNonBlocking);
+            std::cout << "width,active_count,blocks,optimized,gpu_batch_us,host_completion_us\n";
+            benchmark<1>(stream);
+            benchmark<2>(stream);
+            benchmark<3>(stream);
+            benchmark<4>(stream);
+            ATLC_CHECK_CUDA(cudaStreamSynchronize, stream);
+            ATLC_CHECK_CUDA(cudaStreamDestroy, stream);
+            return 0;
+        }
         host_index_checks();
         cudaStream_t stream = nullptr;
         ATLC_CHECK_CUDA(cudaStreamCreateWithFlags, &stream, cudaStreamNonBlocking);
@@ -313,6 +451,10 @@ int main()
             shrinking_groups<2>(workspace, input);
             shrinking_groups<3>(workspace, input);
             shrinking_groups<4>(workspace, input);
+            single_block_dispatch<1>(workspace, input);
+            single_block_dispatch<2>(workspace, input);
+            single_block_dispatch<3>(workspace, input);
+            single_block_dispatch<4>(workspace, input);
             analytic_order(workspace, input);
             fixtures<1>(workspace, input, large);
             fixtures<2>(workspace, input, large);

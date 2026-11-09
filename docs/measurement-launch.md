@@ -94,3 +94,36 @@ Potential remaining costs include the unchanged per-bin shared-memory sums,
 sampling readback. A fused single-block path or smaller block size needs
 measurement before adding specialization; numerical bins may differ slightly
 because adaptive geometry changes summation order.
+
+## Single-block final output
+
+For `measurement_blocks(active_count, maximum) == 1`, grouped reduction now
+passes the existing final-output pointer to the first stage and omits stage two.
+Its bin-major stride is one, so every bin (including impossible zero bins) is
+already final. Inactive threads still initialize their shared bins and join all
+block reductions. Multi-block geometry, output offsets, allocation sizes and
+stream ownership are unchanged. No larger single-block threshold is selected
+without timing evidence.
+
+`measurement_reduce_test` captures warmed enqueue calls and checks one versus
+two kernel nodes across active sizes 1 through 1024, all widths and local-target
+counts, controls, fixed bits and noncontiguous mappings. It checks the reserved
+output offset, compares against the old two-stage kernels and the independent
+physical-index oracle, and poisons reused buffers.
+
+Build with `make bin/measurement_reduce_test`, then run the test normally.
+For paired timing, run `./bin/measurement_reduce_test --benchmark > timings.csv`.
+The optional benchmark compares explicit old two-stage dispatch with enqueue
+for N=1..4 and active sizes 1, 16, 256, 512 and 1048576. Each path receives 20
+warmups and 200 samples. GPU event batch time includes launch gaps; host time
+includes metadata packing, workspace checks and stream completion per call.
+These are reducer timings, not full public measurement API timings or isolated
+GPU kernel durations. Repeat runs and retain variability; the default benchmark
+order is baseline followed by optimized. Use the existing public measurement
+harness for full API timing including NCCL, sampling and readback.
+
+Validation in the implementation environment: `git diff --check` passed, but
+`make test-measurement-reduce` failed before compilation because `nvcc` was not
+on PATH. `nvidia-smi` was also absent. CUDA tests, capture checks, sanitizer runs,
+and both reducer and full API latency measurements remain unexecuted; no runtime
+speedup or numerical agreement is claimed.
