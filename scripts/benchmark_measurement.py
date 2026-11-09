@@ -16,7 +16,7 @@ p.add_argument('--warmups', type=int, default=5)
 p.add_argument('--repetitions', type=int, default=30)
 p.add_argument('--mpiexec', default='mpiexec', help='launcher prefix, e.g. srun --mpi=pmix')
 p.add_argument('--binary', type=Path, default=Path('bin/measurement_backend_benchmark'))
-p.add_argument('--backends', nargs='+', choices=('grouped','rank_sampled','tiled_cdf','auto'),
+p.add_argument('--backends', nargs='+', choices=('grouped','rank_sampled','tiled_cdf','tiled_race','auto'),
                default=['grouped','rank_sampled','tiled_cdf','auto'])
 p.add_argument('--no-build', action='store_true')
 a = p.parse_args()

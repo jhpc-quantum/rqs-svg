@@ -11,6 +11,7 @@ inline int backend_mode(const char* name)
     if (std::strcmp(name, "rank_sampled") == 0) return 1;
     if (std::strcmp(name, "auto") == 0) return 2;
     if (std::strcmp(name, "tiled_cdf") == 0) return 3;
+    if (std::strcmp(name, "tiled_race") == 0) return 4;
     return -1;
 }
 

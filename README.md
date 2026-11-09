@@ -44,6 +44,7 @@ NUM_QUBITS=3 mpirun -np 1 ./bin/qcs --num-samples 10 ghz_circuit.so
 - [Advanced configuration and implementation](docs/advanced-configuration.md): kernel constants, work buffers, NVSHMEM exchange, NCCL copy-back, and CUDA synchronization.
 - [Pauli string expectations](docs/pauli-expectation.md): C/C++ API, implementation, validation status, and benchmarks.
 - [Rank-sampled measurement](docs/rank-sampled-measurement.md): optional distributed backend and partial-measurement semantics.
+- [Experimental tiled race measurement](docs/tiled-race-measurement.md): opt-in backend, validation status, and evaluation.
 - [Measurement reducer](docs/measurement-reducer.md): grouped reduction, GPU sampling, RNG guarantees, regression tests, and profiling.
 - [Explicit NCCL buffer registration](docs/nccl-buffer-registration.md): default buffer registration, alternative modes, and cluster validation.
 

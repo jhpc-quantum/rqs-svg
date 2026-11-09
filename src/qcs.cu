@@ -1,6 +1,7 @@
 #include "measurement_profile.hpp"
 #include "measurement_backend.hpp"
 #include "measurement_tiled_cdf.cuh"
+#include "measurement_race.hpp"
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
@@ -1249,6 +1250,19 @@ namespace qcs
         uint64_t measurement_counter = 0;
         bool measurement_counter_exhausted = false;
         bool rank_sampled_measurement = false;
+        bool tiled_race_measurement = false;
+        uint64_t race_master_seed = 0;
+        MPI_Datatype race_datatype = MPI_DATATYPE_NULL;
+        MPI_Op race_operation = MPI_OP_NULL;
+        static void reduce_race(void* input, void* output, int* length, MPI_Datatype*) {
+            auto* a = static_cast<race_detail::candidate*>(input);
+            auto* b = static_cast<race_detail::candidate*>(output);
+            for (int i = 0; i < *length; ++i) b[i] = race_detail::combine(b[i], a[i]);
+        }
+        void release_race() {
+            if (race_operation != MPI_OP_NULL) MPI_Op_free(&race_operation);
+            if (race_datatype != MPI_DATATYPE_NULL) MPI_Type_free(&race_datatype);
+        }
         bool tiled_cdf_measurement = false;
         bool auto_measurement = false;
         rank_sampling_detail::workspace rank_sampling_workspace;
@@ -1357,6 +1371,7 @@ namespace qcs
                 }
                 if (exchange_copy_stream) cudaStreamDestroy(exchange_copy_stream);
                 if (stream) cudaStreamDestroy(stream);
+                release_race();
                 MPI_Finalize();
                 throw;
             }
@@ -1377,6 +1392,12 @@ namespace qcs
             rank_sampled_measurement = mode == 1;
             auto_measurement = mode == 2;
             tiled_cdf_measurement = mode == 3;
+            tiled_race_measurement = mode == 4;
+            if (tiled_race_measurement) {
+                ATLC_CHECK_MPI(MPI_Type_contiguous, int(sizeof(race_detail::candidate)), MPI_BYTE, &race_datatype);
+                ATLC_CHECK_MPI(MPI_Type_commit, &race_datatype);
+                ATLC_CHECK_MPI(MPI_Op_create, reduce_race, 1, &race_operation);
+            }
             if (tiled_cdf_measurement || rank_sampled_measurement || auto_measurement) {
                 int ready = 1, all_ready = 0;
                 try {
@@ -1505,6 +1526,8 @@ namespace qcs
                 this->rng_seed = rng(); // & ((UINT64_C(1)<<12)-1);
             }
             ATLC_CHECK_MPI(MPI_Bcast, &this->rng_seed, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+
+            race_master_seed = rng_seed; // Immutable snapshot of initialization broadcast.
 
             state_data_device = NULL;
             swap_buffer = NULL;
@@ -2820,6 +2843,80 @@ namespace qcs
                 results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
         }
 
+        void measure_tiled_race(const std::vector<int>& qubits, std::vector<bit_t>& results)
+        {
+            QCS_MEASURE_RANGE("tiled_race.metadata_and_allocation");
+            uint64_t requested = 0;
+            for (int q : qubits) requested |= UINT64_C(1) << q;
+            uint64_t fresh = requested & ~measured_mask_logical;
+            uint64_t sampled = measured_value_logical;
+            if (fresh)
+            {
+                uint64_t mask = 0, value = 0;
+                bool active = true;
+                for (int q = 0; q < num_qubits; ++q)
+                    if (measured_mask_logical & (UINT64_C(1) << q)) {
+                        int p = perm_l2p[q];
+                        uint64_t b = (measured_value_logical >> q) & 1;
+                        if (p < num_qubits_local) {
+                            mask |= UINT64_C(1) << p;
+                            value |= b << p;
+                        } else if (((uint64_t(proc_num) >> (p - num_qubits_local)) & 1) != b)
+                            active = false;
+                    }
+                // Allocate all commit storage before entering the collective protocol.
+                // Any recoverable local build failure is carried by the candidate.
+                race_detail::candidate local{}, winner{};
+                try {
+                    measured_1_qubit_num_logical_list.reserve(num_qubits);
+                    measured_0_qubit_num_logical_list.reserve(num_qubits);
+                    if (measurement_counter_exhausted)
+                        throw std::runtime_error("measurement RNG counter exhausted");
+                    if (!tiled_workspace)
+                        tiled_workspace = std::make_unique<tiled_cdf_detail::workspace>(stream);
+                    QCS_MEASURE_STAGE("tiled_race.local_gpu_build_and_sample");
+                    auto* device_summary = tiled_workspace->build(state_data_device,
+                        num_states_local, mask, value, active);
+                    // draw also handles zero and invalid summaries on device.
+                    auto* device_result = tiled_workspace->draw(race_detail::uniform(
+                        race_master_seed, measurement_counter, uint32_t(proc_num), 0));
+                    tiled_cdf_detail::rank_summary summary{};
+                    tiled_cdf_detail::sample_result result{};
+                    tiled_cdf_detail::check(cudaMemcpyAsync(&summary, device_summary,
+                        sizeof(summary), cudaMemcpyDeviceToHost, stream));
+                    tiled_cdf_detail::check(cudaMemcpyAsync(&result, device_result,
+                        sizeof(result), cudaMemcpyDeviceToHost, stream));
+                    tiled_cdf_detail::check(cudaStreamSynchronize(stream));
+                    if ((summary.status & ~unsigned(tiled_cdf_detail::zero_mass)) ||
+                        (result.status & ~unsigned(tiled_cdf_detail::zero_mass)) ||
+                        (summary.mass > 0 && result.index >= num_states_local))
+                        local.status = 1;
+                    else local = race_detail::make_candidate(summary.mass, result.index,
+                        uint32_t(proc_num), race_detail::uniform(race_master_seed,
+                            measurement_counter, uint32_t(proc_num), 1));
+                } catch (...) { local = {}; local.status = 1; }
+                QCS_MEASURE_STAGE("tiled_race.allreduce");
+                ATLC_CHECK_MPI(MPI_Allreduce, &local, &winner, 1, race_datatype,
+                               race_operation, MPI_COMM_WORLD);
+                if (winner.status || !winner.valid)
+                    throw std::runtime_error("invalid tiled race distribution or local sampling failure");
+                QCS_MEASURE_STAGE("tiled_race.metadata_update");
+                uint64_t physical = winner.index | (uint64_t(winner.rank) << num_qubits_local);
+                for (int q : qubits) if (fresh & (UINT64_C(1) << q)) {
+                    uint64_t b = (physical >> perm_l2p[q]) & 1;
+                    sampled = (sampled & ~(UINT64_C(1) << q)) | (b << q);
+                    (b ? measured_1_qubit_num_logical_list : measured_0_qubit_num_logical_list).push_back(q);
+                }
+                measured_mask_logical |= fresh;
+                measured_value_logical = sampled;
+                pending_projection_mask_logical |= fresh;
+                if (measurement_counter == UINT64_MAX) measurement_counter_exhausted = true;
+                else ++measurement_counter;
+            }
+            for (size_t i = 0; i < qubits.size(); ++i)
+                results[i] = static_cast<bit_t>((sampled >> qubits[i]) & 1);
+        }
+
         void measure_rank_sampled(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
             QCS_MEASURE_RANGE("rank_sampled.metadata_and_allocation");
@@ -2970,7 +3067,8 @@ namespace qcs
 
         void measure_many(const std::vector<int>& qubits, std::vector<bit_t>& results)
         {
-            if (tiled_cdf_measurement) measure_tiled_cdf(qubits, results);
+            if (tiled_race_measurement) measure_tiled_race(qubits, results);
+            else if (tiled_cdf_measurement) measure_tiled_cdf(qubits, results);
             else if (use_rank_sampling(qubits)) measure_rank_sampled(qubits, results);
             else measure_qubit_groups(qubits, results);
         }
@@ -2978,10 +3076,11 @@ namespace qcs
         int measure_qubit(int const qubit)
         {
             if (qubit < 0 || qubit >= num_qubits) throw std::runtime_error("qubit is out of range");
-            if (!tiled_cdf_measurement && !use_rank_sampling({qubit}))
+            if (!tiled_race_measurement && !tiled_cdf_measurement && !use_rank_sampling({qubit}))
                 return static_cast<int>(measure_qubits<1>({qubit}));
             std::vector<bit_t> result(1);
-            if (tiled_cdf_measurement) measure_tiled_cdf({qubit}, result);
+            if (tiled_race_measurement) measure_tiled_race({qubit}, result);
+            else if (tiled_cdf_measurement) measure_tiled_cdf({qubit}, result);
             else measure_rank_sampled({qubit}, result);
             return result[0];
         }
@@ -3258,6 +3357,7 @@ int main() {
                 ATLC_CHECK_NCCL(ncclCommDestroy, nccl_comm);
                 nccl_comm = nullptr;
             }
+            release_race();
             MPI_Finalize();
         };
 

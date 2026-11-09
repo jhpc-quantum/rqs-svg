@@ -13,7 +13,7 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     } else if (c.use_rank_sampling(dispatch_targets)) {
         throw std::runtime_error("auto single-target dispatch regression");
     }
-    if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement) return;
+    if (!c.rank_sampled_measurement && !c.tiled_cdf_measurement && !c.tiled_race_measurement) return;
     auto check = [](bool ok) { if (!ok) throw std::runtime_error("rank sampling metadata regression"); };
     c.initialize_selected_state();
     {
@@ -116,6 +116,23 @@ static void check_rank_sampling_metadata(qcs_simulator* sim)
     c.measure_many(targets, result);
     check(c.measurement_counter == before_local_failure + 1);
     c.initialize_selected_state();
+
+    if (c.tiled_race_measurement) {
+        // One supported rank; finite effective masses near both double limits.
+        // The smallest value stays normal to avoid GPU denormal mode dependence.
+        for (double amplitude : {1e-150, 1e150}) {
+            c.initialize_selected_state();
+            std::vector<qcs::complex_t> state(c.num_states_local, qcs::complex_t(0, 0));
+            if (c.proc_num == c.num_procs - 1) state[0] = qcs::complex_t(amplitude, 0);
+            ATLC_CHECK_CUDA(cudaMemcpyAsync, c.state_data_device, state.data(),
+                state.size()*sizeof(state[0]), cudaMemcpyHostToDevice, c.stream);
+            c.measure_many(targets, result);
+            uint64_t physical = uint64_t(c.num_procs - 1) << c.num_qubits_local;
+            for (size_t j = 0; j < targets.size(); ++j)
+                check(result[j] == ((physical >> c.perm_l2p[targets[j]]) & 1));
+        }
+        c.initialize_selected_state();
+    }
 
     // Invalid effective norms must fail collectively without consuming a draw.
     for (double amplitude : {0.0, std::numeric_limits<double>::quiet_NaN(),

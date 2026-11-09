@@ -254,3 +254,16 @@ BENCH_OUTPUT ?= results/measurement
 .PHONY: benchmark-measurement-backends
 benchmark-measurement-backends: $(MEASUREMENT_BACKEND_BENCHMARK)
 	python3 scripts/benchmark_measurement.py --no-build --binary $(MEASUREMENT_BACKEND_BENCHMARK) --output $(BENCH_OUTPUT) --ranks $(RANKS) --qubits $(BENCH_QUBITS) --warmups $(BENCH_WARMUPS) --repetitions $(BENCH_REPETITIONS) --backends $(BENCH_BACKENDS) --mpiexec '$(MPIEXEC)'
+
+MEASUREMENT_RACE_TEST ?= bin/measurement_race_test
+$(MEASUREMENT_RACE_TEST): tests/measurement_race_test.cpp src/measurement_race.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+.PHONY: test-measurement-race test-measurement-race-integration
+test-measurement-race: $(MEASUREMENT_RACE_TEST)
+	./$(MEASUREMENT_RACE_TEST)
+test-measurement-race-integration: $(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+	QCS_MEASUREMENT_BACKEND=tiled_race $(MPIEXEC) -n $(RANKS) ./$(MEASUREMENT_HARNESS_DIR)/measurement_integration_test
+TEST_BINARIES += $(MEASUREMENT_RACE_TEST)
+$(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST) $(NCCL_BUFFER_HARNESS) $(SWAP_HARNESS): src/measurement_race.hpp
+$(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_race.hpp
