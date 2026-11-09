@@ -118,6 +118,7 @@ __global__ void sample(const state_type* state, uint64_t count, uint64_t mask,
     __shared__ uint64_t tile;
     __shared__ double fraction;
     __shared__ unsigned failure;
+    __shared__ unsigned warp_minima[threads / 32];
     double original[tile_size / threads];
     if (threadIdx.x == 0) {
         failure = summary->status;
@@ -156,15 +157,27 @@ __global__ void sample(const state_type* state, uint64_t count, uint64_t mask,
         return;
     }
     double x = threshold(fraction, total);
-    // Atomic integer min selects the first positive entry whose prefix exceeds x.
+    // Reduce tile-relative indices; tile_size is also the no-candidate sentinel.
+    unsigned candidate = tile_size;
     for (unsigned k = 0; k < tile_size / threads; ++k) {
         unsigned j = threadIdx.x + k * threads;
         if (original[k] > 0 && sums[j] > x)
-            atomicMin(reinterpret_cast<unsigned long long*>(&result->index),
-                      static_cast<unsigned long long>(tile*tile_size+j));
+            candidate = min(candidate, j);
     }
+    for (unsigned offset = 16; offset; offset /= 2)
+        candidate = min(candidate, __shfl_down_sync(0xffffffff, candidate, offset));
+    unsigned lane = threadIdx.x % 32;
+    if (lane == 0) warp_minima[threadIdx.x / 32] = candidate;
     __syncthreads();
-    if (threadIdx.x == 0 && result->index == UINT64_MAX) result->status = invalid_distribution;
+    if (threadIdx.x < 32) {
+        candidate = lane < threads / 32 ? warp_minima[lane] : tile_size;
+        for (unsigned offset = 16; offset; offset /= 2)
+            candidate = min(candidate, __shfl_down_sync(0xffffffff, candidate, offset));
+        if (lane == 0)
+            *result = candidate == tile_size
+                ? sample_result{UINT64_MAX, invalid_distribution}
+                : sample_result{tile * tile_size + candidate, success};
+    }
 }
 
 // Single owner; stream must outlive workspace. Results remain device-resident,

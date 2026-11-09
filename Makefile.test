@@ -230,7 +230,7 @@ $(LIBQCS_SO) $(PAULI_BENCHMARK) $(PAULI_CORE_TEST) $(INITIAL_STATE_TEST): src/me
 $(MEASUREMENT_HARNESS_DIR)/qcs.cu: src/measurement_backend.hpp
 
 TILED_CDF_TEST ?= bin/measurement_tiled_cdf_test
-$(TILED_CDF_TEST): tests/measurement_tiled_cdf_test.cu src/measurement_tiled_cdf.cuh src/measurement_profile.hpp
+$(TILED_CDF_TEST): tests/measurement_tiled_cdf_test.cu tests/measurement_tiled_cdf_atomic_reference.cuh src/measurement_tiled_cdf.cuh src/measurement_profile.hpp
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(LDFLAGS_VENDOR) --cudart=shared
 

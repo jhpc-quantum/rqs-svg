@@ -118,3 +118,31 @@ and `td::masses` from the focused test using identical warmed inputs and launch
 geometry. Use `benchmark-measurement-backends BENCH_BACKENDS=tiled_cdf` on the
 parent and optimized revisions for complete API measurements, with identical
 rank counts, qubits, warmups and repetitions.
+
+## Final sampling reduction
+
+The final selection uses a per-thread minimum tile offset, warp shuffle minima,
+and eight shared warp results reduced by the first warp. Thread 0 writes the
+64-bit basis index and status. The sentinel is `tile_size`; an all-sentinel
+result retains `UINT64_MAX` and `invalid_distribution`. No global selection
+atomics or additional launches are needed. The floating-point prefix scan,
+positive-weight guard, strict `prefix > threshold`, and `nextafter` endpoint
+handling are unchanged. This change is independent of the mass reduction.
+
+The focused test compares index and status with the frozen atomic sampling
+kernel for every draw, including sparse, uniform, skewed, nonnormalized,
+invalid and boundary distributions. Dense dyadic fixtures exercise warp and
+thread-stride boundaries and endpoints. Host backend, launch and work-buffer
+tests and 1,000 host reduction comparisons passed. CUDA compilation and the
+requested two-rank integration run were blocked by missing `nvcc`; rank
+agreement and GPU correctness remain unverified here. No timings are claimed.
+
+On GPU hardware, run `make test-measurement-tiled-cdf` and
+`make test-measurement-tiled-integration RANKS=2` (also with the target rank
+count). The integration test checks MPI minimum/maximum agreement of measured
+outcomes. Compare warmed CUDA-event timings of `test_reference::atomic_sample`
+and `td::sample` with identical prebuilt metadata and launch geometry, covering
+early, middle and endpoint draws on sparse and dense tiles. Compare complete
+API latency using `benchmark-measurement-backends BENCH_BACKENDS=tiled_cdf`
+on the parent and optimized revisions with identical hardware, rank counts,
+qubits, warmups and repetitions.

@@ -1,4 +1,5 @@
 #include "../src/measurement_tiled_cdf.cuh"
+#include "measurement_tiled_cdf_atomic_reference.cuh"
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -117,6 +118,19 @@ int main() {
                     }
                     require(std::abs((long double)summary.mass-total) <= total*1e-13L, "rank mass differs from CPU");
                 }
+                size_t tiles = std::max<size_t>(td::tiles_for(a.size()), 1);
+                double *masses, *cdf;
+                td::rank_summary* baseline_summary;
+                td::sample_result* baseline_result;
+                td::check(cudaMallocAsync(&masses, tiles*sizeof(double), stream));
+                td::check(cudaMallocAsync(&cdf, tiles*sizeof(double), stream));
+                td::check(cudaMallocAsync(&baseline_summary, sizeof(summary), stream));
+                td::check(cudaMallocAsync(&baseline_result, sizeof(td::sample_result), stream));
+                td::check(cudaMemsetAsync(baseline_summary, 0, sizeof(summary), stream));
+                if (!a.empty())
+                    td::masses<<<1, td::threads, 0, stream>>>(device, a.size(), mask, value, active, masses, baseline_summary);
+                td::cdf_scan<<<1, td::threads, 0, stream>>>(masses, cdf, td::tiles_for(a.size()), baseline_summary);
+                td::check(cudaGetLastError());
                 auto capacity = ws.capacity();
                 for (double u : draws) {
                     td::sample_result first{};
@@ -124,9 +138,17 @@ int main() {
                         // Rebuild verifies repeatability of the entire hierarchy.
                         ws.build(device, a.size(), mask, value, active);
                         auto* result_device = ws.draw(u);
+                        td::test_reference::atomic_sample<<<1, td::threads, 0, stream>>>(
+                            device, a.size(), mask, value, active, masses, cdf,
+                            baseline_summary, u, baseline_result);
+                        td::check(cudaGetLastError());
+                        td::sample_result baseline{};
+                        td::check(cudaMemcpyAsync(&baseline, baseline_result, sizeof(baseline), cudaMemcpyDeviceToHost, stream));
                         td::sample_result result{};
                         td::check(cudaMemcpyAsync(&result, result_device, sizeof(result), cudaMemcpyDeviceToHost, stream));
                         td::check(cudaStreamSynchronize(stream));
+                        require(result.index == baseline.index && result.status == baseline.status,
+                                "sample differs from atomic baseline");
                         if (repetition) require(result.index == first.index && result.status == first.status, "not repeatable");
                         first = result;
                         if (expected_status) require(result.status != 0 && result.index == UINT64_MAX, "invalid distribution sampled");
@@ -136,6 +158,10 @@ int main() {
                     }
                 }
                 require(capacity == ws.capacity(), "workspace grew after reserve");
+                td::check(cudaFreeAsync(masses, stream));
+                td::check(cudaFreeAsync(cdf, stream));
+                td::check(cudaFreeAsync(baseline_summary, stream));
+                td::check(cudaFreeAsync(baseline_result, stream));
                 if (device) {
                     std::vector<State> after(a.size());
                     td::check(cudaMemcpyAsync(after.data(), device, a.size()*sizeof(State), cudaMemcpyDeviceToHost, stream));
@@ -155,6 +181,15 @@ int main() {
                 run(a,1,1,true,0,{0,.2,.6,1});
                 run(a,0,0,false,td::zero_mass,{0,1});
             }
+            // Dense contenders and winners on both sides of warp/stride boundaries.
+            std::vector<double> dense_draws{0, 1};
+            for (unsigned i : {31u, 32u, 63u, 64u, 255u, 256u, 4095u}) {
+                double u = double(i) / td::tile_size;
+                dense_draws.push_back(std::nextafter(u, 0.));
+                dense_draws.push_back(u);
+                dense_draws.push_back(std::nextafter(u, 1.));
+            }
+            run(std::vector<State>(td::tile_size, State(2,0)),0,0,true,0,dense_draws);
             // More than one metadata scan batch, including a partial batch.
             std::vector<State> large(257*td::tile_size+3, State(0,0));
             large[1]=State(1,0); large.back()=State(1,0);
