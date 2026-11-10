@@ -16,6 +16,14 @@ int main()
     try
     {
         if (sim->core->num_procs != 1) throw std::runtime_error("requires one GPU/rank");
+        const auto configured_mode = qcs::hadamard_detail::selected_mode();
+        if (sim->core->hadamard_launch_mode != configured_mode)
+            throw std::runtime_error("startup launch mode was not cached");
+        if (sim->core->gpu_sm_count <= 0)
+            throw std::runtime_error("GPU SM count was not cached");
+        setenv("QCS_H_LAUNCH_MODE", "invalid-after-initialization", 1);
+        if (sim->core->hadamard_launch_mode != configured_mode)
+            throw std::runtime_error("cached mode changed with environment");
         for (int n : {1, 2, 5, 10, 20})
         {
             qcs_simulator_set_num_qubits_cxx(sim, n);
@@ -34,7 +42,12 @@ int main()
                     std::vector<qcs::complex_t> expected;
                     for (const char *mode : {"baseline", "A", "B", "grid-stride"})
                     {
-                        setenv("QCS_H_LAUNCH_MODE", mode, 1);
+                        // Private test override compares modes on one simulator;
+                        // public configuration is read only during setup.
+                        sim->core->hadamard_launch_mode = !std::strcmp(mode, "A") ? qcs::hadamard_detail::mode::a :
+                            !std::strcmp(mode, "B") ? qcs::hadamard_detail::mode::b :
+                            !std::strcmp(mode, "grid-stride") ? qcs::hadamard_detail::mode::grid_stride :
+                            qcs::hadamard_detail::mode::baseline;
                         ATLC_CHECK_CUDA(cudaMemcpyAsync, sim->core->state_data_device, initial.data(),
                                         initial.size() * sizeof(initial[0]), cudaMemcpyHostToDevice, sim->core->stream);
                         // Build a nontrivial superposition, then exercise H, X,

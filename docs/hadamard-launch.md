@@ -17,7 +17,9 @@ the launch-mode selector; the original default launch is retained.
 
 The experiment applies only to single-rank, local, uncontrolled Hadamard gates.
 Controlled Hadamard gates, distributed execution, and other gates retain their
-original launch behavior. Invalid mode values are rejected on eligible gates.
+original launch behavior. The mode is read and validated once during simulator
+setup; set the environment before creating the simulator. Later environment
+changes do not affect an existing simulator.
 
 Grid-stride uses the generic gate's existing indexing, amplitude loads/stores,
 and arithmetic through a shared device function. The work count is
@@ -35,10 +37,18 @@ constexpr int kHadamardGridStrideBlockSize = 256;
 constexpr int kHadamardGridStrideBlocksPerSM = 8;
 ```
 
-No runtime geometry overrides are provided. Each grid-stride launch reports its
-mode, constants, actual block count, GPU SM count, and logical work count to
-stderr. Redirect stderr when collecting timings; account for host diagnostics
-when interpreting end-to-end measurements.
+No runtime geometry overrides are provided. Simulator setup reports the selected
+mode, grid-stride constants, cached GPU SM count, and grid block cap to stderr
+once per simulator. The qubit count is not yet known at setup, so the actual
+workload-dependent grid cannot be reported then. The cap is SM count times the
+multiplier; the eventual grid is the smaller of this cap and the blocks needed
+for the prepared work count.
+
+SM count is cached from the existing device-properties query for the simulator's
+assigned GPU. Gate dispatch reads the cached mode and SM count, without device
+queries, environment reads, or diagnostic output. Existing gate preparation,
+metadata transfers, eligibility checks, geometry arithmetic, and asynchronous
+kernel submission still run for each gate.
 
 ## Validation
 

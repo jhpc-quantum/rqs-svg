@@ -1309,6 +1309,8 @@ namespace qcs
         uint64_t initial_free_memory_bytes;
         int log_block_size_max;
         int block_size_max;
+        int gpu_sm_count = 0;
+        hadamard_detail::mode hadamard_launch_mode = hadamard_detail::mode::baseline;
         swap_detail::launch_limits swap_launch_config{1, 1, 1, 1, 1};
         int target_qubit_num_begin;
         int target_qubit_num_end;
@@ -1525,6 +1527,17 @@ namespace qcs
 
             cudaDeviceProp swap_device_properties{};
             ATLC_CHECK_CUDA(cudaGetDeviceProperties, &swap_device_properties, gpu_id);
+            gpu_sm_count = swap_device_properties.multiProcessorCount;
+            hadamard_launch_mode = hadamard_detail::selected_mode();
+            const char *hadamard_mode_name = hadamard_launch_mode == hadamard_detail::mode::a ? "A" :
+                hadamard_launch_mode == hadamard_detail::mode::b ? "B" :
+                hadamard_launch_mode == hadamard_detail::mode::grid_stride ? "grid-stride" : "baseline";
+            // Qubit count is not known until allocation, so only the grid cap
+            // can be reported here, not the eventual workload-dependent grid.
+            fprintf(stderr, "QCS_H_LAUNCH_MODE=%s grid_stride_block_size=%d blocks_per_sm=%d sm_count=%d grid_block_cap=%" PRIu64 "\n",
+                    hadamard_mode_name, hadamard_detail::kHadamardGridStrideBlockSize,
+                    hadamard_detail::kHadamardGridStrideBlocksPerSM, gpu_sm_count,
+                    uint64_t(gpu_sm_count) * hadamard_detail::kHadamardGridStrideBlocksPerSM);
             cudaFuncAttributes swap_kernel_properties{};
             ATLC_CHECK_CUDA(cudaFuncGetAttributes, &swap_kernel_properties, cuda_swap);
             swap_launch_config = swap_detail::launch_limits(block_size_max,
@@ -3301,24 +3314,11 @@ namespace qcs
                         positive_control_qubit_num_logical_list.empty() &&
                         target_qubit_num_physical_list[0] < num_qubits_local)
                     {
-                        auto const mode = hadamard_detail::selected_mode();
+                        auto const mode = hadamard_launch_mode;
                         uint64_t const work = UINT64_C(1) << (num_qubits_local - num_operand_qubits);
-                        int sm_count = 0;
+                        auto const geometry = hadamard_detail::launch(mode, work, gpu_sm_count);
                         if (mode == hadamard_detail::mode::grid_stride)
                         {
-                            int device;
-                            cudaDeviceProp properties;
-                            ATLC_CHECK_CUDA(cudaGetDevice, &device);
-                            ATLC_CHECK_CUDA(cudaGetDeviceProperties, &properties, device);
-                            sm_count = properties.multiProcessorCount;
-                        }
-                        auto const geometry = hadamard_detail::launch(mode, work, sm_count);
-                        if (mode == hadamard_detail::mode::grid_stride)
-                        {
-                            fprintf(stderr, "QCS_H_LAUNCH_MODE=grid-stride block_size=%d blocks_per_sm=%d grid_blocks=%" PRIu64 " sm_count=%d total_work_items=%" PRIu64 "\n",
-                                    hadamard_detail::kHadamardGridStrideBlockSize,
-                                    hadamard_detail::kHadamardGridStrideBlocksPerSM,
-                                    geometry.blocks, sm_count, work);
                             ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate_grid_stride<GateType>, geometry.blocks, geometry.threads, 0, stream, gateobj, work);
                             experimental = true;
                         }
