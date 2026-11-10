@@ -1015,6 +1015,11 @@ namespace qcs
         gateobj.apply(s_in, s_out);
     }
 
+}
+#include "gate_warp.cuh"
+namespace qcs
+{
+
     enum class initstate_enum
     {
         sequential,
@@ -3276,7 +3281,42 @@ namespace qcs
 
             if (proc_num_control_condition)
             {
-                ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj);
+                bool launched = false;
+                // Diagonal gates retain their communication-free original implementation.
+                constexpr bool diagonal = std::is_same_v<GateType, gate::z> ||
+                    std::is_same_v<GateType, gate::s> || std::is_same_v<GateType, gate::sdg> ||
+                    std::is_same_v<GateType, gate::t> || std::is_same_v<GateType, gate::tdg> ||
+                    std::is_same_v<GateType, gate::rz> || std::is_same_v<GateType, gate::rzz> ||
+                    std::is_same_v<GateType, gate::u1> || std::is_same_v<GateType, gate::id> ||
+                    std::is_same_v<GateType, gate::identity>;
+                if constexpr (GateType::num_target_qubits >= 1 && GateType::num_target_qubits <= 3 && !diagonal)
+                {
+                    const char* backend = std::getenv("QCS_GATE_BACKEND");
+                    gate_warp::mapping map;
+                    auto metadata = reinterpret_cast<kernel_input_qnlist_struct*>(qcs_kernel_input_host_buffer.data());
+                    if (backend && std::strcmp(backend, "warp") == 0 &&
+                        metadata->is_measured_bits == 0 &&
+                        gate_warp::build(num_qubits_local, target_qubit_num_physical_list,
+                            negative_control_qubit_num_physical_local_list,
+                            positive_control_qubit_num_physical_local_list, map) &&
+                        map.warps <= uint64_t(2147483647) * 4)
+                    {
+                        unsigned blocks = unsigned((map.warps + 3) / 4);
+                        switch (map.register_count) {
+#define QCS_WARP_LAUNCH(R) case R: ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, (gate_warp::execute<GateType, R>), blocks, 128, 0, stream, gateobj, map, state_data_device); break
+                            QCS_WARP_LAUNCH(0);
+                            QCS_WARP_LAUNCH(1);
+                            QCS_WARP_LAUNCH(2);
+                            QCS_WARP_LAUNCH(3);
+#undef QCS_WARP_LAUNCH
+                        }
+                        launched = true;
+                    }
+                }
+                if (!launched)
+                {
+                    ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj);
+                }
             }
             finish_gate_operation(release_mask);
         }

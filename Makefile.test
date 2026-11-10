@@ -312,3 +312,18 @@ test-exchange: exchange-harness
 	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_HARNESS))
 	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_SERIAL_HARNESS))
 TEST_BINARIES += $(EXCHANGE_HARNESS) $(EXCHANGE_SERIAL_HARNESS) $(EXCHANGE_SERIAL_SOURCE)
+
+GATE_WARP_TEST ?= bin/gate_warp_mapping_test
+$(GATE_WARP_TEST): tests/gate_warp_mapping_test.cpp src/gate_warp_mapping.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+.PHONY: test-gate-warp-mapping gate-warp-harness
+test-gate-warp-mapping: $(GATE_WARP_TEST)
+	./$(GATE_WARP_TEST)
+GATE_WARP_HARNESS ?= bin/gate_warp_harness
+$(GATE_WARP_HARNESS): tests/gate_warp_harness.cu src/qcs.cu $(wildcard src/*.hpp src/*.cuh)
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+gate-warp-harness: $(GATE_WARP_HARNESS)
+TEST_BINARIES += $(GATE_WARP_TEST) $(GATE_WARP_HARNESS)
+$(LIBQCS_SO): src/gate_warp.cuh src/gate_warp_mapping.hpp
