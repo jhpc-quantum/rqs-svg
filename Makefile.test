@@ -312,3 +312,21 @@ test-exchange: exchange-harness
 	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_HARNESS))
 	$(MPIEXEC) -n $(RANKS) $(abspath $(EXCHANGE_SERIAL_HARNESS))
 TEST_BINARIES += $(EXCHANGE_HARNESS) $(EXCHANGE_SERIAL_HARNESS) $(EXCHANGE_SERIAL_SOURCE)
+
+HADAMARD_LAUNCH_TEST ?= bin/hadamard_launch_test
+$(HADAMARD_LAUNCH_TEST): tests/hadamard_launch_test.cpp src/hadamard_launch.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -Wall -Wextra -Werror $< -o $@
+
+HADAMARD_GRID_STRIDE_TEST ?= bin/hadamard_grid_stride_test
+$(HADAMARD_GRID_STRIDE_TEST): tests/hadamard_grid_stride_test.cu src/hadamard_launch.hpp $(filter-out $(LIBQCS_SO),$(wildcard src/*.hpp src/*.cuh src/*.cu)) include/qcs.h
+	mkdir -p $(dir $@)
+	$(NVCC) $(NVCC_CFLAGS) $< -o $@ $(NVCC_LDFLAGS)
+
+.PHONY: test-hadamard-launch test-hadamard-grid-stride
+test-hadamard-launch: $(HADAMARD_LAUNCH_TEST)
+	./$(HADAMARD_LAUNCH_TEST)
+test-hadamard-grid-stride: $(HADAMARD_GRID_STRIDE_TEST)
+	./$(HADAMARD_GRID_STRIDE_TEST)
+
+TEST_BINARIES += $(HADAMARD_LAUNCH_TEST) $(HADAMARD_GRID_STRIDE_TEST)

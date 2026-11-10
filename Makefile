@@ -38,7 +38,7 @@ $(QCS_BIN): src/qcs_main.cpp src/qcs_args.c src/qcs_args.h include/qcs.h $(LIBQC
 	mkdir -p $(dir $@)
 	$(CXX) $(INCLUDE) src/qcs_main.cpp src/qcs_args.c -L$(dir $(LIBQCS_SO)) -lqcs $(QCS_LDFLAGS) -o $@
 
-$(LIBQCS_SO): src/measurement_race_nccl.cuh src/measurement_race.hpp src/measurement_backend.hpp src/measurement_tiled_cdf.cuh src/qcs.cu src/measurement_reduce.cuh src/measurement_launch.hpp src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh src/swap_launch.hpp include/qcs.h src/pauli_reduce.cuh src/pauli_string.hpp
+$(LIBQCS_SO): src/hadamard_launch.hpp src/measurement_race_nccl.cuh src/measurement_race.hpp src/measurement_backend.hpp src/measurement_tiled_cdf.cuh src/qcs.cu src/measurement_reduce.cuh src/measurement_launch.hpp src/work_buffer.cuh src/work_buffer.hpp src/nccl_buffer.cuh src/swap_launch.hpp include/qcs.h src/pauli_reduce.cuh src/pauli_string.hpp
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCC_CFLAGS) -fPIC -shared src/qcs.cu -o $@ $(NVCC_LDFLAGS)
 

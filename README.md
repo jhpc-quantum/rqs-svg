@@ -49,6 +49,8 @@ NUM_QUBITS=3 mpirun -np 1 ./bin/qcs --num-samples 10 ghz_circuit.so
 - [Measurement reducer](docs/measurement-reducer.md): grouped reduction, GPU sampling, RNG guarantees, regression tests, and profiling.
 - [Explicit NCCL buffer registration](docs/nccl-buffer-registration.md): default buffer registration, alternative modes, and cluster validation.
 
+- [Hadamard launch experiment](docs/hadamard-launch.md): runtime modes, compile-time grid-stride geometry, and validation.
+
 ## Acknowledgments
 
 This repository is based on results obtained from a project, JPNP20017, commissioned by the New Energy and Industrial Technology Development Organization (NEDO).

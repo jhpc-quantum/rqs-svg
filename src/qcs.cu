@@ -58,6 +58,7 @@
 #include "pauli_reduce.cuh"
 #include "work_buffer.cuh"
 #include "swap_launch.hpp"
+#include "hadamard_launch.hpp"
 #include "exchange_schedule.hpp"
 
 namespace qcs
@@ -985,12 +986,11 @@ namespace qcs
     }
 
     template <typename GateType, int num_target_qubits = GateType::num_target_qubits>
-    __global__ void cuda_gate(GateType const gateobj)
+    __device__ __forceinline__ void process_gate_work_item(GateType const gateobj, uint64_t thread_num)
     {
         static_assert(num_target_qubits == GateType::num_target_qubits,
                       "num_target_qubits must match the gate");
         constexpr int num_basis_indices = 1 << num_target_qubits;
-        uint64_t const thread_num = (uint64_t)threadIdx.x + (uint64_t)blockIdx.x * (uint64_t)blockDim.x;
         uint64_t index_state[num_basis_indices];
         int is_measured_bits = 0, measured_value_bits = 0;
         if constexpr (num_target_qubits == 0)
@@ -1013,6 +1013,22 @@ namespace qcs
             s_out[i] = &state[index_state[i]];
         }
         gateobj.apply(s_in, s_out);
+    }
+
+    template <typename GateType>
+    __global__ void cuda_gate(GateType const gateobj)
+    {
+        uint64_t const ordinal = uint64_t(threadIdx.x) + uint64_t(blockIdx.x) * blockDim.x;
+        process_gate_work_item(gateobj, ordinal);
+    }
+
+    template <typename GateType>
+    __global__ void cuda_gate_grid_stride(GateType const gateobj, uint64_t total_work_items)
+    {
+        uint64_t const stride = uint64_t(blockDim.x) * gridDim.x;
+        for (uint64_t ordinal = uint64_t(threadIdx.x) + uint64_t(blockIdx.x) * blockDim.x;
+             ordinal < total_work_items; ordinal += stride)
+            process_gate_work_item(gateobj, ordinal);
     }
 
     enum class initstate_enum
@@ -3276,7 +3292,45 @@ namespace qcs
 
             if (proc_num_control_condition)
             {
-                ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj);
+                bool experimental = false;
+                if constexpr (std::is_same_v<GateType, qcs::gate::hadamard>)
+                {
+                    // Use logical controls too: measured controls can disappear
+                    // from the prepared physical lists.
+                    if (num_procs == 1 && negative_control_qubit_num_logical_list.empty() &&
+                        positive_control_qubit_num_logical_list.empty() &&
+                        target_qubit_num_physical_list[0] < num_qubits_local)
+                    {
+                        auto const mode = hadamard_detail::selected_mode();
+                        uint64_t const work = UINT64_C(1) << (num_qubits_local - num_operand_qubits);
+                        int sm_count = 0;
+                        if (mode == hadamard_detail::mode::grid_stride)
+                        {
+                            int device;
+                            cudaDeviceProp properties;
+                            ATLC_CHECK_CUDA(cudaGetDevice, &device);
+                            ATLC_CHECK_CUDA(cudaGetDeviceProperties, &properties, device);
+                            sm_count = properties.multiProcessorCount;
+                        }
+                        auto const geometry = hadamard_detail::launch(mode, work, sm_count);
+                        if (mode == hadamard_detail::mode::grid_stride)
+                        {
+                            fprintf(stderr, "QCS_H_LAUNCH_MODE=grid-stride block_size=%d blocks_per_sm=%d grid_blocks=%" PRIu64 " sm_count=%d total_work_items=%" PRIu64 "\n",
+                                    hadamard_detail::kHadamardGridStrideBlockSize,
+                                    hadamard_detail::kHadamardGridStrideBlocksPerSM,
+                                    geometry.blocks, sm_count, work);
+                            ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate_grid_stride<GateType>, geometry.blocks, geometry.threads, 0, stream, gateobj, work);
+                            experimental = true;
+                        }
+                        else if (mode != hadamard_detail::mode::baseline)
+                        {
+                            ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, geometry.blocks, geometry.threads, 0, stream, gateobj);
+                            experimental = true;
+                        }
+                    }
+                }
+                if (!experimental)
+                    ATLC_CHECK_CUDA(atlc::cudaLaunchKernel, cuda_gate<GateType>, num_blocks_gateop, block_size_gateop, 0, stream, gateobj);
             }
             finish_gate_operation(release_mask);
         }
