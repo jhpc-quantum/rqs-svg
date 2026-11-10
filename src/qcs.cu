@@ -878,7 +878,7 @@ namespace qcs
         }
     }
 
-    __global__ void cuda_swap(uint64_t num_threads, uint64_t ordinal_offset, kernel_input_qnlist_struct const args)
+    __global__ void cuda_swap(uint64_t num_threads, uint64_t ordinal_offset, __grid_constant__ kernel_input_qnlist_struct const args)
     {
         uint64_t ordinal = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
         if (ordinal >= num_threads) return;
@@ -911,7 +911,7 @@ namespace qcs
     }
 
     template <typename GateType, int num_target_qubits = GateType::num_target_qubits>
-    __global__ void cuda_gate(GateType const gateobj, kernel_input_qnlist_struct const args)
+    __global__ void cuda_gate(GateType const gateobj, __grid_constant__ kernel_input_qnlist_struct const args)
     {
         static_assert(sizeof(GateType) + sizeof(kernel_input_qnlist_struct) + alignof(kernel_input_qnlist_struct) <= 4096,
                       "Gate parameters exceed the CUDA kernel parameter limit");
