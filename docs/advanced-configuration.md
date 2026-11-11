@@ -77,6 +77,9 @@ is `false` and the simulator uses NCCL exchange with its
 `exchange_pipeline_copy_back` setting. Clean and rebuild when switching
 between NCCL and NVSHMEM builds.
 
+When NVSHMEM is enabled, initialization defaults `NVSHMEM_IB_ENABLE_IBGDA`
+to `1` if it is unset or empty. Non-empty user values are preserved.
+
 The installation must support MPI bootstrap, registered GPU buffers, device PUT
 and signals, and collective launches. Configure MPI compiler and link flags in
 `config.mk`, expose the NVSHMEM host library at runtime, and provide sufficient

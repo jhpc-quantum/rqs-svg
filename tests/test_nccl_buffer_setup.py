@@ -69,11 +69,13 @@ int main(int argc, char** argv) {
     catch (const std::runtime_error& error) { result = error.what(); }
     const char* value = std::getenv("NCCL_PXN_DISABLE");
     const char* channels = std::getenv("NCCL_NCHANNELS_PER_NET_PEER");
+    const char* ibgda = std::getenv("NVSHMEM_IB_ENABLE_IBGDA");
     const char* chunk = std::getenv("NCCL_P2P_NET_CHUNKSIZE");
     std::cout << result << '\n' << (value ? value : "<unset>") << '\n'
               << calls << '\n' << set_calls << '\n'
               << (channels ? channels : "<unset>") << '\n'
-              << (chunk ? chunk : "<unset>") << '\n';
+              << (chunk ? chunk : "<unset>") << '\n'
+              << (ibgda ? ibgda : "<unset>") << '\n';
 }
 '''
         path = cls.directory / 'setup.cpp'
@@ -95,7 +97,7 @@ int main(int argc, char** argv) {
                 env[name] = setting
         output = subprocess.check_output(
             [str(self.directory / f'setup-{mode}'), scenario], env=env, text=True)
-        result, actual, calls, set_calls, channels, chunk = output.splitlines()
+        result, actual, calls, set_calls, channels, chunk = output.splitlines()[:6]
         return result, actual, int(calls), int(set_calls), channels, chunk
 
     def test_environment_matrix(self):
@@ -137,7 +139,7 @@ int main(int argc, char** argv) {
                     with self.subTest(mode=mode, name=name, value=value):
                         result, _, calls, set_calls, _, _ = self.run_setup(
                             mode, value, name, tuning=(value, value))
-                        self.assertIn('Failed to set NCCL environment defaults', result)
+                        self.assertIn('Failed to set communication environment defaults', result)
                         self.assertEqual(calls, 3)
                         # A later successful setenv must not mask an earlier failure.
                         self.assertEqual(set_calls, 2 + int(mode == 2))
@@ -148,7 +150,7 @@ int main(int argc, char** argv) {
                 with self.subTest(scenario=scenario, value=value):
                     for mode in range(3):
                         result, _, calls, _, _, _ = self.run_setup(mode, value, scenario)
-                        self.assertIn('Failed to set NCCL environment defaults', result)
+                        self.assertIn('Failed to set communication environment defaults', result)
                         self.assertEqual(calls, 3)  # Stop before configuration validation.
         for scenario in ('peer-unsupported', 'old-version', 'nvshmem'):
             for mode in (1, 2):
@@ -162,6 +164,20 @@ int main(int argc, char** argv) {
             self.assertEqual((actual, calls, set_calls), ('<unset>', 2, 0))
         for scenario in ('old-version', 'nvshmem'):
             self.assertEqual(self.run_setup(0, None, scenario)[0], 'ok')
+
+    def test_nvshmem_ibgda_default(self):
+        for scenario in ('normal', 'nvshmem'):
+            for value in (None, '', '0', '1', 'custom'):
+                with self.subTest(scenario=scenario, value=value):
+                    env = os.environ.copy()
+                    env.pop('NVSHMEM_IB_ENABLE_IBGDA', None)
+                    if value is not None:
+                        env['NVSHMEM_IB_ENABLE_IBGDA'] = value
+                    output = subprocess.check_output(
+                        [str(self.directory / 'setup-0'), scenario], env=env, text=True)
+                    expected = '1' if scenario == 'nvshmem' and not value else (
+                        '<unset>' if value is None else value)
+                    self.assertEqual(output.splitlines()[6], expected)
 
     def test_build_modes(self):
         for mode in (None, 0, 1, 2):

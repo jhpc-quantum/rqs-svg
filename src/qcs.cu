@@ -1438,6 +1438,10 @@ namespace qcs
             // Configurable performance defaults; preserve non-empty user overrides.
             set_environment_default("NCCL_NCHANNELS_PER_NET_PEER", "8");
             set_environment_default("NCCL_P2P_NET_CHUNKSIZE", "262144");
+            if (exchange_nvshmem_registered_put)
+            {
+                set_environment_default("NVSHMEM_IB_ENABLE_IBGDA", "1");
+            }
             if constexpr (nccl_buffer_mode == 2)
             {
                 set_environment_default("NCCL_PXN_DISABLE", "1");
@@ -1446,7 +1450,7 @@ namespace qcs
             int all_environment_ok = 0;
             ATLC_CHECK_MPI(MPI_Allreduce, &environment_ok, &all_environment_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             if (!all_environment_ok) throw std::runtime_error(
-                "Failed to set NCCL environment defaults on one or more ranks");
+                "Failed to set communication environment defaults on one or more ranks");
             int version = 0;
             ATLC_CHECK_NCCL(ncclGetVersion, &version);
             const char* pxn = std::getenv("NCCL_PXN_DISABLE");
